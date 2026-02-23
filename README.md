@@ -1,28 +1,28 @@
-📘 ConfessionVerse Frontend
-🌐 Overview
 
-ConfessionVerse Frontend is a modern React application built with Vite, designed to interact with the ConfessionVerse backend API.
-It is fully containerized using Docker and served via Nginx in production.
+ConfessionVerse Frontend
+Overview
 
-This frontend handles:
+ConfessionVerse Frontend is a React application built with Vite and deployed in production using Docker on AWS EC2.
 
-User authentication (register/login)
+The application communicates with the Spring Boot backend via reverse proxy and supports:
 
-Posting and viewing confessions
+Authentication (JWT-based)
+
+Confession posting & browsing
 
 Real-time chat (WebSocket)
 
-Premium features (Stripe integration)
+Stripe billing integration
 
-Admin panel (role-based access)
+Role-based access (Admin)
 
-🛠 Tech Stack
+Tech Stack
 
 React
 
 Vite
 
-JavaScript / JSX
+JavaScript (ES6+)
 
 WebSocket (STOMP)
 
@@ -32,99 +32,96 @@ Docker
 
 Nginx
 
-📁 Project Structure
-confessionverse-frontend/
-│
-├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── services/
-│   ├── context/
-│   └── main.jsx
-│
-├── public/
-├── index.html
-├── vite.config.js
-├── package.json
-├── Dockerfile
-└── README.md
-🚀 Development Setup
-1️⃣ Install dependencies
-npm install
-2️⃣ Start development server
-npm run dev
+AWS EC2
 
-App will run on:
+Environments
+Development
+
+Runs locally using Vite dev server:
 
 http://localhost:5173
 
-Make sure backend is running on:
+Start locally:
+
+npm install
+npm run dev
+
+Backend must run on:
 
 http://localhost:8082
-🏗 Production Build
-Build locally
-npm run build
+Production
 
-Output will be generated inside:
+Deployed on:
 
-/dist
-🐳 Docker Setup
+http://35.153.61.187/
 
-Frontend is containerized and served using Nginx.
+Infrastructure:
 
-🔹 Build Docker image
+Hosted on AWS EC2 (Ubuntu)
+
+Fully containerized using Docker
+
+Nginx reverse proxy container exposed on port 80
+
+Internal Docker network for service isolation
+
+Backend and MySQL are not publicly exposed
+
+Production architecture:
+
+Internet
+   ↓
+Nginx (Docker, port 80)
+   ↓
+Frontend container
+   ↓
+Backend container
+   ↓
+MySQL container (persistent volume)
+Docker
+Build image
 docker build -t confessionverse-frontend .
-🔹 Run container
+Run container (internal network)
 docker run -d \
   --name confessionverse-frontend \
   --network confessionverse-network \
   confessionverse-frontend
-🔄 Reverse Proxy (Nginx)
 
-In production, traffic is routed through an Nginx reverse proxy container.
+Frontend is accessed through the Nginx reverse proxy container.
 
-/ → frontend
+API & WebSocket
 
-/api/ → backend
-
-/ws/ → backend WebSocket
-
-All services run inside the same Docker network.
-
-🌍 Production Deployment
-
-Current production architecture:
-
-Frontend → Docker container (Nginx)
-
-Backend → Docker container (Spring Boot)
-
-Database → Docker container (MySQL)
-
-Reverse Proxy → Docker Nginx (public port 80)
-
-Internal Docker network for service isolation
-
-Only port 80 is exposed publicly.
-
-🔐 Environment Configuration
-
-Frontend communicates with backend via relative API paths:
+Frontend uses relative paths:
 
 /api/
-
-WebSocket endpoint:
-
 /ws/
 
-These are resolved through reverse proxy in production.
+These are resolved via Nginx reverse proxy in production.
 
-📦 Scripts
-Command	Description
-npm run dev	Start development server
-npm run build	Build production version
-npm run preview	Preview production build
-🧪 Test Mode
+Security Model
 
-The application currently runs in test mode (HTTP only).
-SSL will be configured after domain setup.
+Only port 80 is publicly exposed
+
+Backend (8082) is internal only
+
+MySQL (3306) is internal only
+
+Docker network isolates services
+
+JWT-based authentication
+
+Deployment Model
+
+Current deployment is manual Docker orchestration.
+
+Future improvements (handled in infrastructure repository):
+
+Docker Compose
+
+CI/CD pipeline
+
+SSL (Let's Encrypt)
+
+Domain configuration
+
+AWS RDS migration
