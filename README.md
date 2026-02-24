@@ -2,15 +2,9 @@ ConfessionVerse Frontend
 
 Production-ready React frontend deployed in Docker on AWS EC2 behind an Nginx reverse proxy.
 
-The application communicates with a Spring Boot backend and supports authentication, real-time communication, and billing integration.
+This service delivers the user interface for the ConfessionVerse platform, enabling anonymous confessions, AI-powered interactions, real-time messaging, and subscription-based features.
 
-Overview
-
-ConfessionVerse Frontend is a modern single-page application built with React and Vite. It delivers the user interface for anonymous confessions, AI-powered interactions, real-time chat, and subscription-based features.
-
-The application is containerized and deployed in production using Docker, with Nginx acting as a reverse proxy for secure service routing.
-
-Tech Stack
+🚀 Tech Stack
 
 React
 
@@ -20,7 +14,7 @@ JavaScript (ES6+)
 
 WebSocket (STOMP)
 
-Stripe (frontend integration)
+Stripe (Frontend Integration)
 
 Docker
 
@@ -28,7 +22,7 @@ Nginx
 
 AWS EC2
 
-Core Features
+🧩 Core Features
 
 JWT-based authentication
 
@@ -42,50 +36,51 @@ Role-based access (Admin dashboard)
 
 Responsive and scalable UI architecture
 
-Development Environment
+Clean separation of API and WebSocket routing
 
-Runs locally using the Vite development server:
+🏗 Production Architecture
 
-http://localhost:5173
-Start locally
-npm install
-npm run dev
+The frontend is deployed as a Docker container behind an Nginx reverse proxy.
 
-Backend must be running on:
+Internet
+   ↓
+Nginx (Docker – port 80 exposed)
+   ↓
+Frontend (Docker)
+   ↓
+Backend (Docker – Spring Boot)
+   ↓
+Amazon RDS (MySQL – Managed)
+Infrastructure Characteristics
 
-http://localhost:8082
+Hosted on AWS EC2 (Ubuntu)
 
-The frontend communicates with the backend using relative API paths to simplify environment configuration.
-
-Production Deployment
-
-Hosted on AWS EC2 (Ubuntu Linux).
-
-Infrastructure setup:
-
-Fully containerized using Docker
-
-Nginx reverse proxy container exposed on port 80
+Fully containerized
 
 Internal Docker network for service isolation
 
-Backend and MySQL are not publicly exposed
+Backend is not publicly exposed
 
-Production Architecture
+Database runs on Amazon RDS (private, managed)
 
-Internet
-↓
-Nginx (Docker – port 80 exposed)
-↓
-Frontend Container
-↓
-Backend Container
-↓
-MySQL Container (persistent volume)
+Only Nginx (port 80) is publicly accessible
 
-All services operate within a private Docker network to ensure isolation and security.
+🧪 Development Environment
 
-Docker Setup
+Runs locally using Vite development server:
+
+http://localhost:5173
+Start Locally
+npm install
+npm run dev
+
+Backend must run on:
+
+http://localhost:8082
+
+Frontend communicates with backend using relative paths, simplifying environment configuration.
+
+🐳 Docker Deployment
 Build Image
 docker build -t confessionverse-frontend .
 Run Container (Internal Network)
@@ -94,9 +89,9 @@ docker run -d \
   --network confessionverse-network \
   confessionverse-frontend
 
-Frontend traffic is routed exclusively through the Nginx reverse proxy.
+Frontend traffic is routed exclusively through the Nginx reverse proxy container.
 
-API & WebSocket Routing
+🔄 API & WebSocket Routing
 
 Frontend uses relative paths:
 
@@ -109,15 +104,21 @@ Spring Boot REST API
 
 Spring Boot WebSocket endpoint
 
-This eliminates the need for hardcoded backend URLs and enables clean environment separation.
+This design:
 
-Security Model
+Eliminates hardcoded backend URLs
+
+Enables clean environment separation
+
+Supports easy migration to domain + HTTPS
+
+🔐 Security Model
 
 Only port 80 is publicly exposed
 
-Backend (8082) accessible only within Docker network
+Backend (8082) accessible only inside Docker network
 
-MySQL (3306) accessible only within Docker network
+Database (Amazon RDS) not publicly accessible
 
 JWT-based authentication
 
@@ -125,25 +126,36 @@ No secrets stored in repository
 
 Service isolation via Docker networking
 
-Deployment Model
+Reverse proxy enforces controlled routing
+
+📦 Deployment Model
 
 Current deployment uses manual Docker orchestration on a single EC2 instance.
 
-Planned infrastructure improvements:
+Designed for clean evolution toward:
 
-Docker Compose
+Docker Compose orchestration
 
-CI/CD pipeline
+CI/CD pipeline (GitHub Actions)
 
 HTTPS via Let's Encrypt
 
 Custom domain configuration
 
-AWS RDS migration
-
 Infrastructure as Code (Terraform)
 
-Status
+Container registry integration (AWS ECR)
 
-Production-ready for single-instance deployment.
-Designed for scalable cloud migration and future infrastructure automation.
+📌 Status
+
+Production-ready single-instance deployment.
+
+Frontend is fully containerized, environment-agnostic, and built for:
+
+Cloud scalability
+
+Reverse proxy integration
+
+Managed database architecture (Amazon RDS)
+
+Future DevOps automation
