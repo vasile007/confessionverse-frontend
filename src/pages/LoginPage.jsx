@@ -24,11 +24,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const envPaths = (import.meta?.env?.VITE_LOGIN_PATHS || "/auth/login,/auth/authenticate,/login")
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      const endpoints = envPaths.length ? envPaths : ["/auth/login", "/auth/authenticate", "/login"];
+      const endpoint = "/auth/login";
       const usernameKeys = (import.meta?.env?.VITE_LOGIN_USERNAME_FIELDS || "email,username,usernameOrEmail")
         .split(",")
         .map((s) => s.trim())
@@ -37,31 +33,28 @@ export default function LoginPage() {
       let ok = false;
       let welcomeName = "";
       let lastErr = null;
-      for (const path of endpoints) {
-        if (ok) break;
-        for (const body of payloads) {
-          try {
-            const response = await api.post(path, body);
-            const { token: t, accessToken, jwt, username, user } = response.data || {};
-            let token = t || accessToken || jwt;
-            if (!token) {
-              const auth = response.headers?.authorization || response.headers?.Authorization;
-              if (auth && String(auth).toLowerCase().startsWith("bearer ")) {
-                token = auth.split(/\s+/)[1];
-              }
+      for (const body of payloads) {
+        try {
+          const response = await api.post(endpoint, body);
+          const { token: t, accessToken, jwt, username, user } = response.data || {};
+          let token = t || accessToken || jwt;
+          if (!token) {
+            const auth = response.headers?.authorization || response.headers?.Authorization;
+            if (auth && String(auth).toLowerCase().startsWith("bearer ")) {
+              token = auth.split(/\s+/)[1];
             }
-            if (!token) throw new Error("Token missing from response");
-            const uname = username || user?.username || (email?.split("@")[0] || "");
-            const me = await login({ token, username: uname, user: user || { username: uname, email } });
-            welcomeName = String(me?.username || user?.username || uname || "").trim();
-            const role = me?.role || user?.role || null;
-            toast.success(welcomeName ? `Welcome, ${welcomeName}` : "Welcome");
-            navigate(role === "ADMIN" ? "/admin" : "/confessions");
-            ok = true;
-            break;
-          } catch (err) {
-            lastErr = err;
           }
+          if (!token) throw new Error("Token missing from response");
+          const uname = username || user?.username || (email?.split("@")[0] || "");
+          const me = await login({ token, username: uname, user: user || { username: uname, email } });
+          welcomeName = String(me?.username || user?.username || uname || "").trim();
+          const role = me?.role || user?.role || null;
+          toast.success(welcomeName ? `Welcome, ${welcomeName}` : "Welcome");
+          navigate(role === "ADMIN" ? "/admin" : "/confessions");
+          ok = true;
+          break;
+        } catch (err) {
+          lastErr = err;
         }
       }
       if (!ok) {

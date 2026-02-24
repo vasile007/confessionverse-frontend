@@ -311,7 +311,7 @@ export default function ChatPage() {
     if (!cleanUsername) return false;
     if (!isRoomAllowed(selectedRoomType)) {
       if (selectedRoomType === "LATE_NIGHT") {
-        toast.error('"Late Night" e activa doar noaptea (22:00 - 06:00).');
+        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
         return false;
       }
       openPaywall("Access restricted. Join the Inner Circle.");
@@ -399,7 +399,7 @@ export default function ChatPage() {
     } catch (err) {
       const status = Number(err?.response?.status || 0);
       if (status && ![403, 404, 405].includes(status)) {
-        return { items: [], error: "Search indisponibil momentan." };
+        return { items: [], error: "Search is temporarily unavailable." };
       }
     }
 
@@ -414,7 +414,7 @@ export default function ChatPage() {
     const clean = String(username || "").trim();
     if (!clean) return;
     if (clean.toLowerCase() === myUsername) {
-      setSearchError("Nu poti sa-ti trimiti invite tie.");
+      setSearchError("You cannot send an invite to yourself.");
       return;
     }
     setSearchError("");
@@ -436,14 +436,14 @@ export default function ChatPage() {
     e.preventDefault();
     const username = String(searchQuery || "").trim();
     if (!username) {
-      setSearchError("Scrie username-ul persoanei.");
+      setSearchError("Enter the person's username.");
       return;
     }
     setSearchError("");
     setInviteSubmitting(true);
     if (username.toLowerCase() === myUsername) {
       setInviteSubmitting(false);
-      setSearchError("Nu poti sa-ti trimiti invite tie.");
+      setSearchError("You cannot send an invite to yourself.");
       return;
     }
 
@@ -451,9 +451,9 @@ export default function ChatPage() {
     if (!verification.ok) {
       setInviteSubmitting(false);
       if (verification.reason === "not_found") {
-        setSearchError("Username-ul nu exista in baza de date.");
+        setSearchError("Username does not exist in the database.");
       } else {
-        setSearchError("Nu pot valida username-ul acum. Incearca din nou.");
+        setSearchError("I can't validate the username right now. Try again.");
       }
       return;
     }
@@ -625,12 +625,12 @@ export default function ChatPage() {
   const handleSend = async () => {
     if (!inputValue.trim()) return;
     if (!selectedRoom?.id) {
-      toast.error("Nu exista inca o conversatie deschisa aici. Apasa Enter Random Conversation.");
+      toast.error("There is no open conversation here yet. Press Enter Random Conversation.");
       return;
     }
     if (!isRoomAllowed(selectedRoomType)) {
       if (selectedRoomType === "LATE_NIGHT") {
-        toast.error('"Late Night" e activa doar noaptea (22:00 - 06:00).');
+        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
         return;
       }
       openPaywall("Access restricted. Join the Inner Circle.");
@@ -885,7 +885,7 @@ export default function ChatPage() {
                   onClick={async () => {
                     if (!allowed) {
                       if (room.key === "LATE_NIGHT") {
-                        toast.error('"Late Night" e activa doar noaptea (22:00 - 06:00).');
+                        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
                         return;
                       }
                       if (room.premium) {
@@ -955,7 +955,7 @@ export default function ChatPage() {
                 )}
               </>
             ) : (
-              <div className="chat-active-preview__empty">Nu exista conversatii active inca pentru camera selectata.</div>
+              <div className="chat-active-preview__empty">There are no active conversations yet for the selected room.</div>
             )}
           </div>
 
@@ -1018,7 +1018,7 @@ export default function ChatPage() {
             {!loadingMessages && errorMessages && <div className="text-sm text-rose-600">{errorMessages}</div>}
             {!loadingMessages && !errorMessages && !selectedRoom?.id && (
               <div className="text-sm text-amber-300">
-                Nu exista inca o conversatie deschisa pentru camera selectata. Apasa Enter Random Conversation.
+                There is no open conversation yet for the selected room. Press Enter Random Conversation.
               </div>
             )}
             {!loadingMessages && !errorMessages && messages.length === 0 && (
@@ -1066,7 +1066,7 @@ export default function ChatPage() {
               <input
                 type="text"
                 className="input"
-                placeholder={selectedRoom?.id ? "Take your time..." : "Nu exista conversatie deschisa. Apasa Enter Random Conversation."}
+                placeholder={selectedRoom?.id ? "Take your time..." : "There is no open conversation. Press Enter Random Conversation."}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => {
@@ -1226,7 +1226,7 @@ export default function ChatPage() {
                 Close
               </button>
             </div>
-            <p className="text-sm text-slate-400">Cauta user in baza de date si trimite invite in camera selectata.</p>
+            <p className="text-sm text-slate-400">Search for a user in the database and send an invite to the selected room.</p>
             <form className="space-y-3" onSubmit={handleSubmitAddUser}>
               <input
                 type="text"

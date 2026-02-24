@@ -178,10 +178,10 @@ export default function AdminReportsPage() {
       }
 
       if (emailed) {
-        toast.success("Mesaj trimis catre user");
+        toast.success("Message sent to user");
         setRowMessageMap((prev) => ({
           ...prev,
-          [report.id]: { type: "success", text: `Mesaj trimis catre ${reporterEmail}.` },
+          [report.id]: { type: "success", text: `Message sent to ${reporterEmail}.` },
         }));
       } else {
         setRowMessageMap((prev) => ({
