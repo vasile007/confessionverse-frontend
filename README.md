@@ -1,20 +1,14 @@
-
 ConfessionVerse Frontend
+
+Production-ready React frontend deployed in Docker on AWS EC2 behind an Nginx reverse proxy.
+
+The application communicates with a Spring Boot backend and supports authentication, real-time communication, and billing integration.
+
 Overview
 
-ConfessionVerse Frontend is a React application built with Vite and deployed in production using Docker on AWS EC2.
+ConfessionVerse Frontend is a modern single-page application built with React and Vite. It delivers the user interface for anonymous confessions, AI-powered interactions, real-time chat, and subscription-based features.
 
-The application communicates with the Spring Boot backend via reverse proxy and supports:
-
-Authentication (JWT-based)
-
-Confession posting & browsing
-
-Real-time chat (WebSocket)
-
-Stripe billing integration
-
-Role-based access (Admin)
+The application is containerized and deployed in production using Docker, with Nginx acting as a reverse proxy for secure service routing.
 
 Tech Stack
 
@@ -34,30 +28,40 @@ Nginx
 
 AWS EC2
 
-Environments
-Development
+Core Features
 
-Runs locally using Vite dev server:
+JWT-based authentication
+
+Anonymous confession posting and browsing
+
+Real-time chat via WebSockets
+
+Stripe billing integration
+
+Role-based access (Admin dashboard)
+
+Responsive and scalable UI architecture
+
+Development Environment
+
+Runs locally using the Vite development server:
 
 http://localhost:5173
-
-Start locally:
-
+Start locally
 npm install
 npm run dev
 
-Backend must run on:
+Backend must be running on:
 
 http://localhost:8082
-Production
 
-Deployed on:
+The frontend communicates with the backend using relative API paths to simplify environment configuration.
 
-http://35.153.61.187/
+Production Deployment
 
-Infrastructure:
+Hosted on AWS EC2 (Ubuntu Linux).
 
-Hosted on AWS EC2 (Ubuntu)
+Infrastructure setup:
 
 Fully containerized using Docker
 
@@ -67,61 +71,79 @@ Internal Docker network for service isolation
 
 Backend and MySQL are not publicly exposed
 
-Production architecture:
+Production Architecture
 
 Internet
-   ↓
-Nginx (Docker, port 80)
-   ↓
-Frontend container
-   ↓
-Backend container
-   ↓
-MySQL container (persistent volume)
-Docker
-Build image
+↓
+Nginx (Docker – port 80 exposed)
+↓
+Frontend Container
+↓
+Backend Container
+↓
+MySQL Container (persistent volume)
+
+All services operate within a private Docker network to ensure isolation and security.
+
+Docker Setup
+Build Image
 docker build -t confessionverse-frontend .
-Run container (internal network)
+Run Container (Internal Network)
 docker run -d \
   --name confessionverse-frontend \
   --network confessionverse-network \
   confessionverse-frontend
 
-Frontend is accessed through the Nginx reverse proxy container.
+Frontend traffic is routed exclusively through the Nginx reverse proxy.
 
-API & WebSocket
+API & WebSocket Routing
 
 Frontend uses relative paths:
 
 /api/
 /ws/
 
-These are resolved via Nginx reverse proxy in production.
+In production, Nginx resolves these routes to:
+
+Spring Boot REST API
+
+Spring Boot WebSocket endpoint
+
+This eliminates the need for hardcoded backend URLs and enables clean environment separation.
 
 Security Model
 
 Only port 80 is publicly exposed
 
-Backend (8082) is internal only
+Backend (8082) accessible only within Docker network
 
-MySQL (3306) is internal only
-
-Docker network isolates services
+MySQL (3306) accessible only within Docker network
 
 JWT-based authentication
 
+No secrets stored in repository
+
+Service isolation via Docker networking
+
 Deployment Model
 
-Current deployment is manual Docker orchestration.
+Current deployment uses manual Docker orchestration on a single EC2 instance.
 
-Future improvements (handled in infrastructure repository):
+Planned infrastructure improvements:
 
 Docker Compose
 
 CI/CD pipeline
 
-SSL (Let's Encrypt)
+HTTPS via Let's Encrypt
 
-Domain configuration
+Custom domain configuration
 
 AWS RDS migration
+
+Infrastructure as Code (Terraform)
+
+Status
+
+Production-ready for single-instance deployment.
+Designed for scalable cloud migration and future infrastructure automation.
