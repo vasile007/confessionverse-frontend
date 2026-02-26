@@ -1,161 +1,252 @@
-ConfessionVerse Frontend
+ConfessionVerse – AWS Cloud Infrastructure
 
-Production-ready React frontend deployed in Docker on AWS EC2 behind an Nginx reverse proxy.
+Production-grade AWS infrastructure designed and implemented using Terraform to support a fully containerized full-stack application with automated CI/CD deployment.
 
-This service delivers the user interface for the ConfessionVerse platform, enabling anonymous confessions, AI-powered interactions, real-time messaging, and subscription-based features.
+This repository defines a secure, modular, and reproducible cloud environment following Infrastructure-as-Code and DevOps best practices.
 
-🚀 Tech Stack
+🚀 Architecture Overview
 
-React
+Current implementation represents a production-aligned, cost-optimized single-instance architecture with automated deployment.
 
-Vite
-
-JavaScript (ES6+)
-
-WebSocket (STOMP)
-
-Stripe (Frontend Integration)
-
-Docker
-
-Nginx
-
-AWS EC2
-
-🧩 Core Features
-
-JWT-based authentication
-
-Anonymous confession posting and browsing
-
-Real-time chat via WebSockets
-
-Stripe billing integration
-
-Role-based access (Admin dashboard)
-
-Responsive and scalable UI architecture
-
-Clean separation of API and WebSocket routing
-
-🏗 Production Architecture
-
-The frontend is deployed as a Docker container behind an Nginx reverse proxy.
+System Flow
 
 Internet
-   ↓
-Nginx (Docker – port 80 exposed)
-   ↓
-Frontend (Docker)
-   ↓
-Backend (Docker – Spring Boot)
-   ↓
-Amazon RDS (MySQL – Managed)
-Infrastructure Characteristics
+↓
+EC2 (Ubuntu 22.04)
+↓
+Docker Containers
 
-Hosted on AWS EC2 (Ubuntu)
+Nginx (public reverse proxy – port 80)
 
-Fully containerized
+Spring Boot Backend (internal – 8082)
+↓
+Amazon RDS (MySQL 8 – private subnets)
 
-Internal Docker network for service isolation
+☁ Infrastructure Components
+Networking
 
-Backend is not publicly exposed
+Custom VPC
 
-Database runs on Amazon RDS (private, managed)
+2 Public Subnets
 
-Only Nginx (port 80) is publicly accessible
+2 Private Subnets
 
-🧪 Development Environment
+Internet Gateway
 
-Runs locally using Vite development server:
+Route Tables (segmented public/private)
 
-http://localhost:5173
-Start Locally
-npm install
-npm run dev
+CIDR-based network isolation
 
-Backend must run on:
+Compute
 
-http://localhost:8082
+EC2 (Ubuntu 22.04)
 
-Frontend communicates with backend using relative paths, simplifying environment configuration.
+IAM Instance Role attached
 
-🐳 Docker Deployment
-Build Image
-docker build -t confessionverse-frontend .
-Run Container (Internal Network)
-docker run -d \
-  --name confessionverse-frontend \
-  --network confessionverse-network \
-  confessionverse-frontend
+Docker runtime
 
-Frontend traffic is routed exclusively through the Nginx reverse proxy container.
+Access via AWS Systems Manager (no SSH exposed)
 
-🔄 API & WebSocket Routing
+Database
 
-Frontend uses relative paths:
+Amazon RDS (MySQL 8)
 
-/api/
-/ws/
+Deployed in private subnets
 
-In production, Nginx resolves these routes to:
+Not publicly accessible
 
-Spring Boot REST API
+Encrypted at rest (AWS KMS)
 
-Spring Boot WebSocket endpoint
+Automated backups enabled
 
-This design:
-
-Eliminates hardcoded backend URLs
-
-Enables clean environment separation
-
-Supports easy migration to domain + HTTPS
+Access restricted via Security Groups
 
 🔐 Security Model
 
-Only port 80 is publicly exposed
+No SSH (port 22 closed)
 
-Backend (8082) accessible only inside Docker network
+Access via AWS Systems Manager (Session Manager)
 
-Database (Amazon RDS) not publicly accessible
+IAM role-based authentication (no static credentials on EC2)
 
-JWT-based authentication
+Principle of least privilege
 
-No secrets stored in repository
+Security Groups enforce strict inbound rules
 
-Service isolation via Docker networking
+Database isolated from public internet
 
-Reverse proxy enforces controlled routing
+📦 Infrastructure as Code
 
-📦 Deployment Model
+Provisioned entirely using Terraform.
 
-Current deployment uses manual Docker orchestration on a single EC2 instance.
+Structure:
+
+confessionverse-infrastructure/
+│
+├── main.tf
+├── providers.tf
+├── variables.tf
+├── outputs.tf
+├── terraform.tfvars (excluded from Git)
+│
+└── modules/
+    ├── vpc/
+    ├── security/
+    ├── ec2/
+    └── rds/
+
+Features:
+
+Modular architecture
+
+Reusable components
+
+Version-controlled definitions
+
+Declarative resource management
+
+Idempotent provisioning
+
+☁ Remote Terraform State
+
+Backend configuration:
+
+S3 bucket (versioning enabled)
+
+DynamoDB table for state locking
+
+Encryption enabled
+
+Public access blocked
+
+Benefits:
+
+Prevents state corruption
+
+Enables team collaboration
+
+Enterprise-grade state management
+
+🔄 CI/CD Deployment Architecture
+
+Application deployment is fully automated.
+
+Deployment Flow
+
+Developer pushes to main branch
+↓
+GitHub Actions
+↓
+Build Docker image
+↓
+Push image to Amazon ECR
+↓
+AWS Systems Manager executes remote deploy
+↓
+Docker container restart on EC2
+
+No SSH required.
+No manual docker commands.
+No static AWS keys stored on instance.
+
+🐳 Container Registry
+
+Amazon ECR used for backend and frontend images
+
+EC2 authenticates via IAM role
+
+No access keys configured on server
+
+🛡 Access Model
+
+EC2 access handled via:
+
+AWS Systems Manager (SSM)
+
+IAM Role: AmazonSSMManagedInstanceCore
+
+No exposed management ports
+
+No SSH key management
+
+This eliminates public administrative attack surface.
+
+🎯 Design Principles
+
+Infrastructure as Code
+
+Immutable container deployment
+
+Network isolation
+
+Least privilege access
+
+No static credentials
+
+Separation of application and infrastructure layers
+
+Cost-aware cloud design
+
+Production-aligned patterns
+
+📌 Project Scope Demonstrates
+
+Cloud infrastructure engineering
+
+Secure AWS architecture design
+
+Terraform modular design
+
+Private database networking
+
+IAM role-based container deployment
+
+Remote state management
+
+CI/CD automation with ECR + SSM
+
+🔮 Production Evolution Path
 
 Designed for clean evolution toward:
 
-Docker Compose orchestration
+Application Load Balancer (ALB)
 
-CI/CD pipeline (GitHub Actions)
+Auto Scaling Groups
 
-HTTPS via Let's Encrypt
+HTTPS via ACM
 
-Custom domain configuration
+Multi-AZ RDS deployment
 
-Infrastructure as Code (Terraform)
+CloudWatch centralized logging
 
-Container registry integration (AWS ECR)
+Prometheus + Grafana monitoring
 
-📌 Status
+ECS or EKS migration
 
-Production-ready single-instance deployment.
+📊 Current Status
 
-Frontend is fully containerized, environment-agnostic, and built for:
+Production-ready single-instance cloud deployment with:
 
-Cloud scalability
+Automated CI/CD
 
-Reverse proxy integration
+Docker-based application layer
 
-Managed database architecture (Amazon RDS)
+Managed database layer
 
-Future DevOps automation
+Secure networking segmentation
+
+Infrastructure reproducibility
+
+🏁 Summary
+
+This project demonstrates the ability to:
+
+Design and implement secure AWS infrastructure
+
+Automate container deployment workflows
+
+Apply Infrastructure-as-Code principles
+
+Integrate CI/CD with cloud-native services
+
+Follow modern DevOps and Cloud Engineering practices
