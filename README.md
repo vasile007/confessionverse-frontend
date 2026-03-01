@@ -1,252 +1,108 @@
-ConfessionVerse – AWS Cloud Infrastructure
+ConfessionVerse – Frontend Application
 
-Production-grade AWS infrastructure designed and implemented using Terraform to support a fully containerized full-stack application with automated CI/CD deployment.
+Frontend client for the ConfessionVerse platform, responsible for delivering the user interface and interacting with the backend API.
 
-This repository defines a secure, modular, and reproducible cloud environment following Infrastructure-as-Code and DevOps best practices.
+The application handles authentication flows, billing interactions, AI-driven features, and real-time messaging through secure API communication.
 
-🚀 Architecture Overview
+🚀 Tech Stack
 
-Current implementation represents a production-aligned, cost-optimized single-instance architecture with automated deployment.
+React
 
-System Flow
+JavaScript
 
-Internet
+HTML5 / CSS3
+
+Axios (API communication)
+
+WebSockets (real-time features)
+
+Docker
+
+Nginx (production serving)
+
+🏗 Application Architecture
+
+The frontend communicates with the backend via REST APIs and WebSocket connections.
+
+Runtime Flow
+
+User
 ↓
-EC2 (Ubuntu 22.04)
+React Frontend
 ↓
-Docker Containers
-
-Nginx (public reverse proxy – port 80)
-
-Spring Boot Backend (internal – 8082)
+Spring Boot Backend API
 ↓
-Amazon RDS (MySQL 8 – private subnets)
+Database (MySQL)
 
-☁ Infrastructure Components
-Networking
+The production build is served via an Nginx container inside a Dockerized environment.
 
-Custom VPC
+🔌 API Integration
 
-2 Public Subnets
+The frontend integrates with:
 
-2 Private Subnets
+Authentication endpoints
 
-Internet Gateway
+Stripe billing workflows
 
-Route Tables (segmented public/private)
+AI processing endpoints
 
-CIDR-based network isolation
+Real-time messaging services
 
-Compute
+Backend base URL is configured via environment variables.
 
-EC2 (Ubuntu 22.04)
+🐳 Containerization
 
-IAM Instance Role attached
+Frontend is containerized using Docker for consistent deployment.
 
-Docker runtime
+Production build generated using npm run build
 
-Access via AWS Systems Manager (no SSH exposed)
+Static assets served via Nginx
 
-Database
+Environment-based configuration
 
-Amazon RDS (MySQL 8)
+No sensitive credentials stored in client code
 
-Deployed in private subnets
+🔄 Deployment
 
-Not publicly accessible
+Deployment is automated via CI/CD pipeline:
 
-Encrypted at rest (AWS KMS)
+Docker image build
 
-Automated backups enabled
+Push to Amazon ECR
 
-Access restricted via Security Groups
+Remote deployment to EC2
 
-🔐 Security Model
+Container restart
 
-No SSH (port 22 closed)
+Infrastructure provisioning is handled separately in the infrastructure repository.
 
-Access via AWS Systems Manager (Session Manager)
+🛠 Local Development
 
-IAM role-based authentication (no static credentials on EC2)
+Install dependencies:
 
-Principle of least privilege
+npm install
 
-Security Groups enforce strict inbound rules
+Run development server:
 
-Database isolated from public internet
+npm run dev
 
-📦 Infrastructure as Code
+Build production version:
 
-Provisioned entirely using Terraform.
+npm run build
+🔐 Security Considerations
 
-Structure:
+No secret keys stored in frontend
 
-confessionverse-infrastructure/
-│
-├── main.tf
-├── providers.tf
-├── variables.tf
-├── outputs.tf
-├── terraform.tfvars (excluded from Git)
-│
-└── modules/
-    ├── vpc/
-    ├── security/
-    ├── ec2/
-    └── rds/
+Sensitive logic handled server-side
 
-Features:
+Environment variables used for configuration
 
-Modular architecture
+CORS handled at backend level
 
-Reusable components
+📌 Characteristics
 
-Version-controlled definitions
-
-Declarative resource management
-
-Idempotent provisioning
-
-☁ Remote Terraform State
-
-Backend configuration:
-
-S3 bucket (versioning enabled)
-
-DynamoDB table for state locking
-
-Encryption enabled
-
-Public access blocked
-
-Benefits:
-
-Prevents state corruption
-
-Enables team collaboration
-
-Enterprise-grade state management
-
-🔄 CI/CD Deployment Architecture
-
-Application deployment is fully automated.
-
-Deployment Flow
-
-Developer pushes to main branch
-↓
-GitHub Actions
-↓
-Build Docker image
-↓
-Push image to Amazon ECR
-↓
-AWS Systems Manager executes remote deploy
-↓
-Docker container restart on EC2
-
-No SSH required.
-No manual docker commands.
-No static AWS keys stored on instance.
-
-🐳 Container Registry
-
-Amazon ECR used for backend and frontend images
-
-EC2 authenticates via IAM role
-
-No access keys configured on server
-
-🛡 Access Model
-
-EC2 access handled via:
-
-AWS Systems Manager (SSM)
-
-IAM Role: AmazonSSMManagedInstanceCore
-
-No exposed management ports
-
-No SSH key management
-
-This eliminates public administrative attack surface.
-
-🎯 Design Principles
-
-Infrastructure as Code
-
-Immutable container deployment
-
-Network isolation
-
-Least privilege access
-
-No static credentials
-
-Separation of application and infrastructure layers
-
-Cost-aware cloud design
-
-Production-aligned patterns
-
-📌 Project Scope Demonstrates
-
-Cloud infrastructure engineering
-
-Secure AWS architecture design
-
-Terraform modular design
-
-Private database networking
-
-IAM role-based container deployment
-
-Remote state management
-
-CI/CD automation with ECR + SSM
-
-🔮 Production Evolution Path
-
-Designed for clean evolution toward:
-
-Application Load Balancer (ALB)
-
-Auto Scaling Groups
-
-HTTPS via ACM
-
-Multi-AZ RDS deployment
-
-CloudWatch centralized logging
-
-Prometheus + Grafana monitoring
-
-ECS or EKS migration
-
-📊 Current Status
-
-Production-ready single-instance cloud deployment with:
-
-Automated CI/CD
-
-Docker-based application layer
-
-Managed database layer
-
-Secure networking segmentation
-
-Infrastructure reproducibility
-
-🏁 Summary
-
-This project demonstrates the ability to:
-
-Design and implement secure AWS infrastructure
-
-Automate container deployment workflows
-
-Apply Infrastructure-as-Code principles
-
-Integrate CI/CD with cloud-native services
-
-Follow modern DevOps and Cloud Engineering practices
+✔ API-driven architecture
+✔ Dockerized deployment
+✔ Environment-based configuration
+✔ Automated CI/CD integration
+✔ Decoupled infrastructure provisioning
