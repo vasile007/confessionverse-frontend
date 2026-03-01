@@ -1,5 +1,9 @@
 ConfessionVerse – Frontend Application
 
+
+<img width="750" height="752" alt="Screenshot 2026-03-01 200052" src="https://github.com/user-attachments/assets/d304a376-c1c7-45f4-8358-a72d1d07568b" />
+
+
 Frontend client for the ConfessionVerse platform, responsible for delivering the user interface and interacting with the backend API.
 
 The application handles authentication flows, billing interactions, AI-driven features, and real-time messaging through secure API communication.
