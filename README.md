@@ -1,74 +1,52 @@
-ConfessionVerse – Frontend Application
+ConfessionVerse – Frontend
 
 
 <img width="750" height="752" alt="Screenshot 2026-03-01 200052" src="https://github.com/user-attachments/assets/d304a376-c1c7-45f4-8358-a72d1d07568b" />
 
+Frontend application built with React, responsible for delivering the user interface and communicating with the Spring Boot backend API.
 
-Frontend client for the ConfessionVerse platform, responsible for delivering the user interface and interacting with the backend API.
+Overview
 
-The application handles authentication flows, billing interactions, AI-driven features, and real-time messaging through secure API communication.
+The application provides:
 
-🚀 Tech Stack
+Authentication flows
+
+Stripe-based billing interactions
+
+AI-driven feature interaction
+
+Real-time messaging via WebSockets
+
+All business logic and sensitive operations are handled server-side.
+
+Tech Stack
 
 React
 
 JavaScript
 
-HTML5 / CSS3
+HTML / CSS
 
-Axios (API communication)
+Axios
 
-WebSockets (real-time features)
+WebSockets
 
 Docker
 
-Nginx (production serving)
+Nginx
 
-🏗 Application Architecture
-
-The frontend communicates with the backend via REST APIs and WebSocket connections.
-
-Runtime Flow
+Architecture
 
 User
-↓
-React Frontend
-↓
-Spring Boot Backend API
-↓
-Database (MySQL)
+→ React Frontend
+→ Spring Boot Backend API
+→ MySQL Database
 
-The production build is served via an Nginx container inside a Dockerized environment.
+The production build is served via Nginx inside a Docker container.
 
-🔌 API Integration
+Deployment
 
-The frontend integrates with:
-
-Authentication endpoints
-
-Stripe billing workflows
-
-AI processing endpoints
-
-Real-time messaging services
-
-Backend base URL is configured via environment variables.
-
-🐳 Containerization
-
-Frontend is containerized using Docker for consistent deployment.
-
-Production build generated using npm run build
-
-Static assets served via Nginx
-
-Environment-based configuration
-
-No sensitive credentials stored in client code
-
-🔄 Deployment
-
-Deployment is automated via CI/CD pipeline:
+The frontend is deployed through an automated CI/CD pipeline:
 
 Docker image build
 
@@ -78,9 +56,9 @@ Remote deployment to EC2
 
 Container restart
 
-Infrastructure provisioning is handled separately in the infrastructure repository.
+Infrastructure provisioning is managed separately in the infrastructure repository.
 
-🛠 Local Development
+Local Development
 
 Install dependencies:
 
@@ -93,20 +71,25 @@ npm run dev
 Build production version:
 
 npm run build
-🔐 Security Considerations
+Security
 
-No secret keys stored in frontend
+No secret keys stored in client code
 
-Sensitive logic handled server-side
+API base URL configured via environment variables
 
-Environment variables used for configuration
+Sensitive logic handled on the backend
 
-CORS handled at backend level
+CORS configured server-side
 
-📌 Characteristics
+Key Characteristics
 
-✔ API-driven architecture
-✔ Dockerized deployment
-✔ Environment-based configuration
-✔ Automated CI/CD integration
-✔ Decoupled infrastructure provisioning
+API-driven architecture
+
+Containerized deployment
+
+Environment-based configuration
+
+Automated CI/CD integration
+
+Decoupled infrastructure provisioning
+
