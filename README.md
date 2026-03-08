@@ -1,95 +1,131 @@
-ConfessionVerse – Frontend
+
+
+
+
+# ConfessionVerse – Frontend
 
 
 <img width="750" height="752" alt="Screenshot 2026-03-01 200052" src="https://github.com/user-attachments/assets/d304a376-c1c7-45f4-8358-a72d1d07568b" />
 
-Frontend application built with React, responsible for delivering the user interface and communicating with the Spring Boot backend API.
 
-Overview
+Frontend application built with **React**, responsible for delivering the user interface and interacting with the backend API.
 
-The application provides:
+The application communicates with a Spring Boot backend and provides the user-facing functionality of the ConfessionVerse platform.
 
-Authentication flows
+---
 
-Stripe-based billing interactions
+# Application Overview
 
-AI-driven feature interaction
+The frontend provides:
 
-Real-time messaging via WebSockets
+* User authentication flows
+* AI-driven interactions
+* Stripe-based billing interface
+* Real-time messaging via WebSockets
 
-All business logic and sensitive operations are handled server-side.
+All sensitive operations and business logic are handled on the backend.
 
-Tech Stack
+---
 
-React
+# Tech Stack
 
-JavaScript
+* React
+* JavaScript
+* HTML / CSS
+* Axios
+* WebSockets
+* Docker
+* Nginx
 
-HTML / CSS
+---
 
-Axios
+# Architecture
 
-WebSockets
-
-Docker
-
-Nginx
-
-Architecture
-
+```text
 User
-→ React Frontend
-→ Spring Boot Backend API
-→ MySQL Database
+  │
+  ▼
+React Frontend
+  │
+  ▼
+Spring Boot Backend API
+  │
+  ▼
+MySQL Database
+```
 
-The production build is served via Nginx inside a Docker container.
+The production build is served via **Nginx inside a Docker container**.
 
-Deployment
+---
 
-The frontend is deployed through an automated CI/CD pipeline:
+# Deployment
 
-Docker image build
+Frontend deployment is fully automated using CI/CD.
 
+Deployment pipeline:
+
+```text
+Developer Push
+      │
+      ▼
+GitHub Actions
+      │
+      ▼
+Docker Image Build
+      │
+      ▼
 Push to Amazon ECR
+      │
+      ▼
+Remote Deployment to EC2
+      │
+      ▼
+Container Restart
+```
 
-Remote deployment to EC2
+Infrastructure provisioning is handled separately in the **infrastructure repository**.
 
-Container restart
+---
 
-Infrastructure provisioning is managed separately in the infrastructure repository.
-
-Local Development
+# Local Development
 
 Install dependencies:
 
+```id="npm1"
 npm install
+```
 
 Run development server:
 
+```id="npm2"
 npm run dev
+```
 
 Build production version:
 
+```id="npm3"
 npm run build
-Security
+```
 
-No secret keys stored in client code
+---
 
-API base URL configured via environment variables
+# Security
 
-Sensitive logic handled on the backend
+Security considerations implemented:
 
-CORS configured server-side
+* No secret keys stored in client code
+* API base URL configured via environment variables
+* Sensitive logic handled on the backend
+* CORS protection implemented server-side
 
-Key Characteristics
+---
 
-API-driven architecture
+# Key Characteristics
 
-Containerized deployment
+* API-driven architecture
+* Containerized deployment
+* Environment-based configuration
+* Automated CI/CD pipeline
+* Decoupled infrastructure provisioning
 
-Environment-based configuration
-
-Automated CI/CD integration
-
-Decoupled infrastructure provisioning
 
