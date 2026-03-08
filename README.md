@@ -51,7 +51,7 @@ React Frontend
 Spring Boot Backend API
   │
   ▼
-MySQL Database
+Amazon RDS (MySQL)
 ```
 
 The production build is served via **Nginx inside a Docker container**.
