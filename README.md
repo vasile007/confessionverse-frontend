@@ -5,7 +5,7 @@
 # ConfessionVerse – Frontend
 
 
-<img width="800" height="600" alt="Screenshot 2026-03-01 200052" src="https://github.com/user-attachments/assets/d304a376-c1c7-45f4-8358-a72d1d07568b" />
+<img width="800" height="800" alt="Screenshot 2026-03-01 200052" src="https://github.com/user-attachments/assets/d304a376-c1c7-45f4-8358-a72d1d07568b" />
 
 
 Frontend application built with **React**, responsible for delivering the user interface and interacting with the backend API.
