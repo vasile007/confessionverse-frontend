@@ -12,6 +12,14 @@ Frontend application built with **React**, responsible for delivering the user i
 
 The application communicates with a Spring Boot backend and provides the user-facing functionality of the ConfessionVerse platform.
 
+## 🌐 Live Environment
+
+https://confessionverse.live
+
+The frontend is deployed in a live environment and integrated with the backend via API and WebSocket communication.
+Production build served via Nginx reverse proxy
+
+
 ---
 
 # Application Overview
@@ -127,5 +135,13 @@ Security considerations implemented:
 * Environment-based configuration
 * Automated CI/CD pipeline
 * Decoupled infrastructure provisioning
+
+## 🚀 Features
+
+* Authentication flows (login/register)
+* Real-time chat interface (WebSockets)
+* AI-assisted interactions
+* Stripe-based billing UI
+* Responsive user interface
 
 
