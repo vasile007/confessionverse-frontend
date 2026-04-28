@@ -4451,7 +4451,59 @@ body {
 }
 
 .home-luxe__socials {
-  display: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  margin-bottom: 0.45rem;
+}
+
+.home-luxe__social-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(239, 218, 185, 0.92);
+  text-decoration: none;
+  transition: transform 0.2s ease, filter 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+
+.home-luxe__social-link:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+.home-luxe__social-link:focus-visible,
+.home-luxe__social-link:active {
+  outline: none;
+  transform: translateY(1px);
+  filter: brightness(1.12);
+}
+
+.home-luxe__social-link svg {
+  width: 1.55rem;
+  height: 1.55rem;
+  fill: currentColor;
+}
+
+.home-luxe__social-link--facebook {
+  color: #1877f2;
+  filter: drop-shadow(0 0 10px rgba(24, 119, 242, 0.22));
+}
+
+.home-luxe__social-link--tiktok {
+  color: #f4f4f5;
+  filter:
+    drop-shadow(1.4px 0 0 rgba(37, 244, 238, 0.95))
+    drop-shadow(-1.4px 0 0 rgba(254, 44, 85, 0.92))
+    drop-shadow(0 0 8px rgba(255, 255, 255, 0.12));
+}
+
+.home-luxe__social-link--instagram {
+  color: rgba(244, 244, 245, 0.96);
+}
+
+.home-luxe__social-link--instagram svg {
+  filter: drop-shadow(0 0 12px rgba(238, 42, 123, 0.18));
 }
 
 .home-luxe__copy {
