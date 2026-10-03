@@ -162,7 +162,11 @@ export default function ChatPage() {
   useEffect(() => {
     if (isAdmin) return undefined;
     const client = connectChatSocket({
-      onConnected: () => setSocketReady(true),
+      onConnected: () => {
+        setSocketReady(true);
+        loadInvites();
+        loadRooms();
+      },
       onMatch: (event) => {
         if (event?.status === "ROOM_UPDATED" && event?.chatRoom?.id) {
           const updated = event.chatRoom;
@@ -312,10 +316,16 @@ export default function ChatPage() {
     }
     setPrivateBusy(true);
     try {
-      await createChatroomWithFallback(clean);
+      const result = await createChatroomWithFallback(clean, "DIRECT");
       setPrivateUsername("");
       setStartPrivateOpen(false);
-      toast.success("Private chat request sent. The chat opens after acceptance.");
+      if (String(result?.status || "").toUpperCase() === "ACCEPTED" && result?.chatRoom?.id) {
+        await loadRooms();
+        selectRoom(result.chatRoom, "private");
+        toast.success("Private conversation opened.");
+        return;
+      }
+      toast.success(result?.message || "Private chat request sent. The chat opens after acceptance.");
       await loadRooms();
     } catch (error) {
       toast.error(error?.response?.data?.error || "Unable to send private chat request");
@@ -337,6 +347,11 @@ export default function ChatPage() {
     } finally {
       setInviteBusy(null);
     }
+  };
+
+  const openInvites = async () => {
+    setInvitesOpen(true);
+    await loadInvites();
   };
 
   const renderMessage = (message) => {
@@ -400,7 +415,7 @@ export default function ChatPage() {
           </nav>
 
           <button className="cv-start-private" onClick={() => setStartPrivateOpen(true)}><UserPlus size={17} /> Start Private Chat</button>
-          <button className="cv-invites-button" onClick={() => setInvitesOpen(true)}><Bell size={16} /> Requests {invites.length > 0 && <b>{invites.length}</b>}</button>
+          <button className="cv-invites-button" onClick={openInvites}><Bell size={16} /> Requests {invites.length > 0 && <b>{invites.length}</b>}</button>
           {!user?.premium && <button className="cv-upgrade-button" onClick={() => navigate("/subscriptions")}>Upgrade to Premium</button>}
         </aside>
 
