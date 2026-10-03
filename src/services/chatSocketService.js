@@ -8,7 +8,7 @@ function websocketUrl() {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-export function connectChatSocket({ onMatch, onMessage, onDisconnect }) {
+export function connectChatSocket({ onConnected, onMatch, onMessage, onInvitesChanged, onRoomsChanged, onDisconnect }) {
   const token = getToken();
   if (!token) return null;
 
@@ -21,6 +21,9 @@ export function connectChatSocket({ onMatch, onMessage, onDisconnect }) {
     onConnect: () => {
       client.subscribe("/user/queue/random-chat", (frame) => onMatch?.(JSON.parse(frame.body)));
       client.subscribe("/user/queue/messages", (frame) => onMessage?.(JSON.parse(frame.body)));
+      client.subscribe("/user/queue/chat-invites", (frame) => onInvitesChanged?.(JSON.parse(frame.body)));
+      client.subscribe("/user/queue/chatrooms", (frame) => onRoomsChanged?.(JSON.parse(frame.body)));
+      onConnected?.();
     },
     onWebSocketClose: () => onDisconnect?.(),
   });

@@ -1,1359 +1,474 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bell, LogOut, RefreshCw, Send, Shuffle, UserPlus, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { Smile, Send, RotateCw, Bell, UserPlus } from "lucide-react";
-import api from "../api";
 import { toast } from "react-hot-toast";
-import { getStoredUserId } from "../services/tokenService.js";
-import UserIdentity from "../components/UserIdentity.jsx";
+import api from "../api";
 import { useAuth } from "../context/AuthContext.jsx";
-import { getMySubscription } from "../services/BillingService.jsx";
-import { aiAnalyzeEmotion } from "../services/aiAssistService.js";
-import { getAiQuotaState, tryConsumeAiUse } from "../services/aiQuotaService.js";
-import { markStreakActivity } from "../services/streakService.js";
+import UserIdentity from "../components/UserIdentity.jsx";
 import { connectChatSocket, publishChatMessage } from "../services/chatSocketService.js";
 import {
   acceptChatInvite,
-  createChatInvite,
   createChatroomWithFallback,
-  getMyChatInvites,
   declineChatInvite,
+  getMyChatInvites,
 } from "../services/chatroomService.js";
 
-const ROOM_DEFINITIONS = [
-  {
-    key: "STANDARD",
-    name: "General",
-    icon: "\u{1F30D}",
-    premium: false,
-    description: "Always active room where everyone can join and chat.",
-    rules: ["Respectful tone only", "No harassment", "No spam"],
-  },
-  {
-    key: "LATE_NIGHT",
-    name: "Late Night",
-    icon: "\u{1F319}",
-    premium: false,
-    description: "Night talks and relaxed late-hour chat.",
-    rules: ["Keep it civil", "No explicit content", "No contact sharing"],
-  },
-  {
-    key: "HEARTBEAT",
-    name: "Premium Room",
-    icon: "\u{1F451}",
-    premium: true,
-    description: "Inner Circle access.",
-    rules: ["No explicit sexual content", "No harassment", "No personal contacts in early messages"],
-  },
-];
+const modeForRoom = (room) => {
+  const type = String(room?.roomType || "").toUpperCase();
+  if (type === "STANDARD") return "community";
+  if (type === "RANDOM" || String(room?.username || "").startsWith("Random ")) return "random";
+  return "private";
+};
 
-const ROOM_KEY_SET = new Set(ROOM_DEFINITIONS.map((r) => r.key));
-const DISABLE_PREMIUM_GATES = String(import.meta?.env?.VITE_DISABLE_PREMIUM_GATES || "").toLowerCase() === "true";
+const senderName = (message) =>
+  String(message?.sender?.username || message?.senderUsername || message?.sender || "Anonymous");
+const ACTIVE_ROOM_STORAGE_KEY = "cv_active_chat_room_id";
 
 export default function ChatPage() {
   const navigate = useNavigate();
   const { isAdmin, user } = useAuth();
-  const [chatRooms, setChatRooms] = useState([]);
-  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [rooms, setRooms] = useState([]);
+  const [activeRoom, setActiveRoom] = useState(null);
+  const [activeMode, setActiveMode] = useState("community");
   const [messages, setMessages] = useState([]);
-  const [loadingRooms, setLoadingRooms] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [errorRooms, setErrorRooms] = useState("");
-  const [errorMessages, setErrorMessages] = useState("");
-  const [inputValue, setInputValue] = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchError, setSearchError] = useState("");
-  const [userSuggestions, setUserSuggestions] = useState([]);
-  const [userSuggestionsLoading, setUserSuggestionsLoading] = useState(false);
-  const [userSuggestionsError, setUserSuggestionsError] = useState("");
-  const [addUserOpen, setAddUserOpen] = useState(false);
-  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [randomBusy, setRandomBusy] = useState(false);
+  const [socketReady, setSocketReady] = useState(false);
   const [invites, setInvites] = useState([]);
-  const [invitesLoading, setInvitesLoading] = useState(false);
-  const [invitesApiBroken, setInvitesApiBroken] = useState(false);
   const [invitesOpen, setInvitesOpen] = useState(false);
-  const [invitesActionId, setInvitesActionId] = useState(null);
-  const [selectedRoomType, setSelectedRoomType] = useState("STANDARD");
-  const [subscription, setSubscription] = useState(null);
-  const [heartbeatTrack, setHeartbeatTrack] = useState("No music");
-  const [selectedEmoji, setSelectedEmoji] = useState("\u{1F60A}");
-  const [emojiOpen, setEmojiOpen] = useState(false);
-  const [invitedByNotice, setInvitedByNotice] = useState("");
-  const [invitedByRoomId, setInvitedByRoomId] = useState(null);
-  const [paywallOpen, setPaywallOpen] = useState(false);
-  const [paywallMessage, setPaywallMessage] = useState("Access restricted. Join the Inner Circle.");
-  const [premiumPreviewOpen, setPremiumPreviewOpen] = useState(false);
-  const [randomLoading, setRandomLoading] = useState(false);
-  const [matchState, setMatchState] = useState("idle");
-  const [roomUnread, setRoomUnread] = useState({});
-  const [selectedRoomPeers, setSelectedRoomPeers] = useState([]);
-  const [messageAnalysis, setMessageAnalysis] = useState("");
-  const [analyzingMessage, setAnalyzingMessage] = useState(false);
-  const [quotaTick, setQuotaTick] = useState(0);
+  const [inviteBusy, setInviteBusy] = useState(null);
+  const [startPrivateOpen, setStartPrivateOpen] = useState(false);
+  const [privateUsername, setPrivateUsername] = useState("");
+  const [privateBusy, setPrivateBusy] = useState(false);
+  const socketRef = useRef(null);
+  const activeRoomIdRef = useRef(null);
+  const messageViewportRef = useRef(null);
   const messagesEndRef = useRef(null);
-  const messagesContainerRef = useRef(null);
-  const roomLatestRef = useRef({});
-  const roomMessageSigRef = useRef({});
-  const chatSocketRef = useRef(null);
-  const selectedRoomIdRef = useRef(null);
-  const matchedRoomIdRef = useRef(null);
-  const seenStorageKey = `cv_seen_room_last_${String(user?.id || user?.username || "anon")}`;
-  const emojis = useMemo(
-    () => [
-      "\u{1F60A}",
-      "\u{1F642}",
-      "\u{1F605}",
-      "\u{1F979}",
-      "\u{1F602}",
-      "\u{1F62E}",
-      "\u{1F60E}",
-      "\u{1F973}",
-      "\u{1F622}",
-      "\u{1F525}",
-    ],
-    []
-  );
+  const shouldFollowRef = useRef(true);
+  const messageRequestRef = useRef(0);
+  const randomOperationRef = useRef(false);
+  const roomRequestRef = useRef(0);
 
-  const selectedRoomMeta = useMemo(
-    () => ROOM_DEFINITIONS.find((r) => r.key === selectedRoomType) || ROOM_DEFINITIONS[0],
-    [selectedRoomType]
-  );
-  const aiQuota = useMemo(() => getAiQuotaState(user), [user, quotaTick]);
-  const aiLocked = !aiQuota.isPro && aiQuota.remaining <= 0;
-  const hasProAccess = (sub) => {
-    const status = String(sub?.status || "").toLowerCase();
-    if (status === "active" || status === "trialing") return true;
-    return !!user?.premium || String(sub?.planType || "").toUpperCase() === "PRO";
-  };
+  const myUsername = String(user?.username || "").toLowerCase();
+  const communityRoom = useMemo(() => rooms.find((room) => modeForRoom(room) === "community") || null, [rooms]);
+  const randomRoom = useMemo(() => rooms.find((room) => modeForRoom(room) === "random") || null, [rooms]);
+  const privateRooms = useMemo(() => rooms.filter((room) => modeForRoom(room) === "private"), [rooms]);
 
-  const isPro = useMemo(() => {
-    return hasProAccess(subscription);
-  }, [subscription, user?.premium]);
-  const myUsername = String(user?.username || "").trim().toLowerCase();
-
-  const isFreeLimitError = (err) => {
-    const code = String(err?.response?.data?.code || "").toUpperCase();
-    const msg = String(err?.response?.data?.error || err?.response?.data?.message || err?.message || "").toLowerCase();
-    return code === "FREE_LIMIT_REACHED" || (msg.includes("free plan") && msg.includes("upgrade"));
-  };
-
-  const isLateNightActiveNow = () => {
-    const hour = new Date().getHours();
-    return hour >= 22 || hour < 6;
-  };
-
-  const openPaywall = (msg) => {
-    if (DISABLE_PREMIUM_GATES) {
-      toast.error(msg || "Premium gate disabled in dev mode.");
-      return;
-    }
-    setPaywallMessage(msg || "Access restricted. Join the Inner Circle.");
-    setPaywallOpen(true);
-  };
-
-  const openPremiumPreview = () => {
-    setPremiumPreviewOpen(true);
-  };
-
-  const normalizeRoomType = (room) => String(room?.roomType || "").toUpperCase();
-
-  const isConversationRoom = (room) => {
+  const privateRoomLabel = useCallback((room) => {
     const participants = Array.isArray(room?.participants) ? room.participants : [];
-    return !!room?.creator && participants.length >= 2;
-  };
+    const other = participants.find((participant) =>
+      String(participant?.username || "").toLowerCase() !== myUsername);
+    return other?.username || "Private chat";
+  }, [myUsername]);
 
-  const getMessageKey = (msg) => String(msg?.id || msg?.timestamp || msg?.createdAt || msg?.sentAt || msg?.time || "");
+  const roomLabel = activeMode === "community"
+    ? "Community"
+    : activeMode === "random"
+      ? "Random Chat"
+      : privateRoomLabel(activeRoom);
 
-  const getMessageSender = (msg) =>
-    String(msg?.sender?.username || msg?.sender || msg?.senderUsername || "").trim().toLowerCase();
-
-  const markRoomSeen = (roomId, key) => {
-    if (!roomId || !key) return;
+  const loadInvites = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(seenStorageKey);
-      const map = raw ? JSON.parse(raw) : {};
-      const next = map && typeof map === "object" ? map : {};
-      next[String(roomId)] = String(key);
-      localStorage.setItem(seenStorageKey, JSON.stringify(next));
-    } catch {}
-  };
-
-  const getRoomLabel = (room) => {
-    const type = normalizeRoomType(room);
-    if (ROOM_KEY_SET.has(type)) {
-      return ROOM_DEFINITIONS.find((r) => r.key === type)?.name || room?.name || "Room";
-    }
-    return String(room?.name || room?.title || "").trim() || "Conversation";
-  };
-
-  const fetchRoomParticipants = async (roomId) => {
-    const paths = [`/chatrooms/${roomId}/participants`, `/chatrooms/${roomId}/members`, `/chatrooms/${roomId}/users`];
-    let lastErr = null;
-    for (const path of paths) {
-      try {
-        const res = await api.get(path);
-        const data = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.content) ? res.data.content : [];
-        return data;
-      } catch (err) {
-        lastErr = err;
-        const status = Number(err?.response?.status || 0);
-        if (![404, 405].includes(status)) break;
-      }
-    }
-    throw lastErr || new Error("Unable to load room participants");
-  };
-
-  const isRoomAllowed = (roomKey) => {
-    if (DISABLE_PREMIUM_GATES) return true;
-    if (roomKey === "LATE_NIGHT" && !isLateNightActiveNow()) return false;
-    const room = ROOM_DEFINITIONS.find((r) => r.key === roomKey);
-    if (!room) return true;
-    return !room.premium || isPro;
-  };
-
-  const loadSubscription = async () => {
-    try {
-      const sub = await getMySubscription();
-      setSubscription(sub || null);
-      return sub || null;
+      const result = await getMyChatInvites();
+      setInvites(result.filter((invite) => String(invite?.status || "").toUpperCase() === "PENDING"));
     } catch {
-      setSubscription(null);
-      return null;
+      // Chat remains usable if invitation refresh is temporarily unavailable.
     }
-  };
+  }, []);
 
-  const loadRooms = async () => {
-    setLoadingRooms(true);
-    setErrorRooms("");
+  const loadRooms = useCallback(async ({ preserveSelection = true } = {}) => {
+    const requestId = ++roomRequestRef.current;
     try {
-      const res = await api.get("/chatrooms");
-      const data = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.content) ? res.data.content : [];
-      setChatRooms(data);
-      try {
-        const pendingRoomId = Number(sessionStorage.getItem("cv_open_room_id") || 0);
-        if (pendingRoomId) {
-          const target = data.find((r) => Number(r?.id) === pendingRoomId);
-          if (target) {
-            const targetType = normalizeRoomType(target);
-            if (ROOM_KEY_SET.has(targetType)) {
-              setSelectedRoomType(targetType);
-            }
-            setSelectedRoom(target);
-            sessionStorage.removeItem("cv_open_room_id");
-          }
-        }
-        const inviteRoomId = Number(sessionStorage.getItem("cv_invited_room_id") || 0);
-        const inviteBy = String(sessionStorage.getItem("cv_invited_by") || "").trim();
-        if (inviteRoomId && inviteBy) {
-          setInvitedByNotice(inviteBy);
-          setInvitedByRoomId(inviteRoomId);
-          sessionStorage.removeItem("cv_invited_by");
-          sessionStorage.removeItem("cv_invited_room_id");
-        }
-      } catch {}
-    } catch (err) {
-      console.error(err);
-      setErrorRooms("Unable to load chat rooms.");
+      const response = await api.get("/chatrooms");
+      if (requestId !== roomRequestRef.current) return;
+      const list = Array.isArray(response.data) ? response.data : response.data?.content || [];
+      const visible = list.filter((room) => {
+        const type = String(room?.roomType || "").toUpperCase();
+        return type === "STANDARD" || type === "RANDOM" || type === "DIRECT"
+          || String(room?.username || "").startsWith("Random ");
+      });
+      setRooms(visible);
+      const storedRoomId = !preserveSelection
+        ? Number(sessionStorage.getItem(ACTIVE_ROOM_STORAGE_KEY) || 0)
+        : 0;
+      const desiredRoomId = preserveSelection ? activeRoomIdRef.current : storedRoomId;
+      const refreshed = desiredRoomId
+        ? visible.find((room) => Number(room.id) === Number(desiredRoomId))
+        : null;
+      const target = refreshed
+        || visible.find((room) => String(room?.roomType || "").toUpperCase() === "STANDARD")
+        || null;
+      activeRoomIdRef.current = target?.id || null;
+      setActiveRoom(target);
+      setActiveMode(target ? modeForRoom(target) : "community");
+    } catch (error) {
+      if (requestId !== roomRequestRef.current) return;
+      toast.error(error?.response?.data?.error || "Unable to load chats");
     } finally {
-      setLoadingRooms(false);
+      if (requestId === roomRequestRef.current) setLoading(false);
     }
-  };
+  }, []);
 
-  const loadInvites = async () => {
-    setInvitesLoading(true);
+  const loadMessages = useCallback(async (roomId) => {
+    const requestId = ++messageRequestRef.current;
+    if (!roomId) {
+      setMessages([]);
+      setMessagesLoading(false);
+      return;
+    }
+    setMessagesLoading(true);
     try {
-      const data = await getMyChatInvites();
-      const pending = data.filter((inv) => String(inv?.status || "").toUpperCase() === "PENDING");
-      setInvites(pending);
-      setInvitesApiBroken(false);
-    } catch (err) {
-      setInvites([]);
-      if (Number(err?.response?.status || 0) >= 500) {
-        setInvitesApiBroken(true);
-      }
+      const response = await api.get(`/messages/chatroom/${roomId}`, { params: { size: 100 } });
+      if (requestId !== messageRequestRef.current || Number(roomId) !== Number(activeRoomIdRef.current)) return;
+      const list = response.data?.content ?? response.data ?? [];
+      setMessages(Array.isArray(list) ? list : []);
+      shouldFollowRef.current = true;
+    } catch (error) {
+      if (requestId !== messageRequestRef.current) return;
+      setMessages([]);
+      toast.error(error?.response?.data?.error || "Unable to load messages");
     } finally {
-      setInvitesLoading(false);
+      if (requestId === messageRequestRef.current) setMessagesLoading(false);
     }
-  };
+  }, []);
 
-  const loadMessages = async (roomId, opts = {}) => {
-    const silent = !!opts?.silent;
-    if (!roomId) return;
-    if (!silent) {
-      setLoadingMessages(true);
-      setErrorMessages("");
-    }
-    try {
-      const res = await api.get(`/messages/chatroom/${roomId}`);
-      const data = res.data?.content ?? res.data;
-      const list = Array.isArray(data) ? data : [];
-      const last = list.length ? list[list.length - 1] : null;
-      const key = last ? getMessageKey(last) : "";
-      const signature = `${list.length}:${key}`;
-      const prevSignature = String(roomMessageSigRef.current[roomId] || "");
-      const changed = prevSignature !== signature;
-      roomMessageSigRef.current[roomId] = signature;
-
-      if (changed) {
-        setMessages(list);
-      }
-      if (list.length) {
-        if (key) roomLatestRef.current[roomId] = key;
-        if (selectedRoom?.id && Number(selectedRoom.id) === Number(roomId) && key) {
-          markRoomSeen(roomId, key);
-        }
-      }
-      if (selectedRoom?.id && Number(selectedRoom.id) === Number(roomId)) {
-        const roomType = normalizeRoomType(selectedRoom);
-        if (ROOM_KEY_SET.has(roomType)) {
-          setRoomUnread((prev) => ({ ...prev, [roomType]: 0 }));
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      if (!silent) setErrorMessages("Unable to load messages.");
-    } finally {
-      if (!silent) setLoadingMessages(false);
-    }
-  };
-
-  const inviteOrStartConversation = async (username) => {
-    const cleanUsername = String(username || "").trim();
-    if (!cleanUsername) return false;
-    if (!isRoomAllowed(selectedRoomType)) {
-      if (selectedRoomType === "LATE_NIGHT") {
-        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
-        return false;
-      }
-      openPaywall("Access restricted. Join the Inner Circle.");
-      return false;
-    }
-
-    try {
-      if (selectedRoom?.id) {
-        await createChatInvite(selectedRoom.id, cleanUsername);
-      } else {
-        const roomData = await createChatroomWithFallback(cleanUsername, selectedRoomType);
-        const room = roomData?.chatRoom || roomData?.room || roomData;
-        const roomId = Number(roomData?.chatRoomId || room?.id || 0);
-        if (roomId) {
-          try {
-            sessionStorage.setItem("cv_open_room_id", String(roomId));
-          } catch {}
-          await loadRooms();
-        }
-      }
-      toast.success("Invite sent. User must accept.");
-      setSearchQuery("");
-      setSearchError("");
-      return true;
-    } catch (err) {
-      console.error(err);
-      const msg = err?.response?.data?.error || "Unable to create conversation";
-      if (isFreeLimitError(err)) {
-        openPaywall(msg);
-      } else {
-        toast.error(msg);
-      }
-      return false;
-    }
-  };
-
-  const verifyUsernameExists = async (username) => {
-    const clean = String(username || "").trim();
-    if (!clean) return { ok: false, reason: "empty" };
-    const encoded = encodeURIComponent(clean);
-    const paths = [`/users/public/${encoded}`, `/users/profile/${encoded}`];
-    let lastErr = null;
-
-    for (const path of paths) {
-      try {
-        const res = await api.get(path);
-        const found = String(res?.data?.username || "").trim();
-        if (found) return { ok: true, username: found };
-        return { ok: true, username: clean };
-      } catch (err) {
-        lastErr = err;
-        const status = Number(err?.response?.status || 0);
-        if ([404, 405].includes(status)) continue;
-        return { ok: false, reason: "verify_failed", error: err };
-      }
-    }
-
-    if (Number(lastErr?.response?.status || 0) === 404) {
-      return { ok: false, reason: "not_found" };
-    }
-    return { ok: false, reason: "verify_failed", error: lastErr };
-  };
-
-  const searchUserSuggestions = async (query) => {
-    const clean = String(query || "").trim().toLowerCase();
-    if (!clean) return { items: [], error: "" };
-    const publicSearchPath = `/users/public/search?query=${encodeURIComponent(clean)}`;
-    try {
-      const res = await api.get(publicSearchPath);
-      const list = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.content) ? res.data.content : [];
-      const usernames = list
-        .map((entry) => {
-          if (typeof entry === "string") return entry;
-          return String(entry?.username || entry?.user?.username || entry?.profile?.username || "").trim();
-        })
-        .filter(Boolean)
-        .filter((name) => name.toLowerCase().includes(clean))
-        .filter((name) => name.toLowerCase() !== myUsername);
-
-      const unique = Array.from(new Set(usernames.map((name) => name.toLowerCase())))
-        .map((lower) => usernames.find((n) => n.toLowerCase() === lower))
-        .filter(Boolean)
-        .slice(0, 8);
-      return { items: unique, error: "" };
-    } catch (err) {
-      const status = Number(err?.response?.status || 0);
-      if (status && ![403, 404, 405].includes(status)) {
-        return { items: [], error: "Search is temporarily unavailable." };
-      }
-    }
-
-    const exact = await verifyUsernameExists(clean);
-    if (!exact.ok || !exact.username || exact.username.toLowerCase() === myUsername) {
-      return { items: [], error: "" };
-    }
-    return { items: [exact.username], error: "" };
-  };
-
-  const handleAddSuggestedUser = async (username) => {
-    const clean = String(username || "").trim();
-    if (!clean) return;
-    if (clean.toLowerCase() === myUsername) {
-      setSearchError("You cannot send an invite to yourself.");
-      return;
-    }
-    setSearchError("");
-    setInviteSubmitting(true);
-    const ok = await inviteOrStartConversation(clean);
-    setInviteSubmitting(false);
-    if (ok) setAddUserOpen(false);
-  };
-
-  const handleOpenAddUser = () => {
-    setSearchError("");
-    setUserSuggestionsError("");
-    setSearchQuery("");
-    setUserSuggestions([]);
-    setAddUserOpen(true);
-  };
-
-  const handleSubmitAddUser = async (e) => {
-    e.preventDefault();
-    const username = String(searchQuery || "").trim();
-    if (!username) {
-      setSearchError("Enter the person's username.");
-      return;
-    }
-    setSearchError("");
-    setInviteSubmitting(true);
-    if (username.toLowerCase() === myUsername) {
-      setInviteSubmitting(false);
-      setSearchError("You cannot send an invite to yourself.");
-      return;
-    }
-
-    const verification = await verifyUsernameExists(username);
-    if (!verification.ok) {
-      setInviteSubmitting(false);
-      if (verification.reason === "not_found") {
-        setSearchError("Username does not exist in the database.");
-      } else {
-        setSearchError("I can't validate the username right now. Try again.");
-      }
-      return;
-    }
-
-    const ok = await inviteOrStartConversation(verification.username || username);
-    setInviteSubmitting(false);
-    if (ok) setAddUserOpen(false);
-  };
+  const selectRoom = useCallback((room, mode = modeForRoom(room)) => {
+    if (!room?.id) return;
+    activeRoomIdRef.current = room.id;
+    messageRequestRef.current += 1;
+    sessionStorage.setItem(ACTIVE_ROOM_STORAGE_KEY, String(room.id));
+    setActiveMode(mode);
+    setActiveRoom(room);
+    setMessages([]);
+  }, []);
 
   useEffect(() => {
-    if (!addUserOpen) return;
-    const query = String(searchQuery || "").trim();
-    if (query.length < 2) {
-      setUserSuggestions([]);
-      setUserSuggestionsError("");
-      setUserSuggestionsLoading(false);
+    if (isAdmin) {
+      toast.error("Admin accounts cannot access chat.");
+      navigate("/admin", { replace: true });
       return;
     }
-
-    let cancelled = false;
-    setUserSuggestionsLoading(true);
-    setUserSuggestionsError("");
-
-    const timer = setTimeout(async () => {
-      const result = await searchUserSuggestions(query);
-      if (cancelled) return;
-      setUserSuggestions(result.items);
-      setUserSuggestionsError(result.error || "");
-      setUserSuggestionsLoading(false);
-    }, 260);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [addUserOpen, searchQuery, myUsername]);
-
-  useEffect(() => {
-    if (isAdmin) return;
-    loadRooms();
-    loadSubscription();
+    loadRooms({ preserveSelection: false });
     loadInvites();
-  }, [isAdmin]);
+  }, [isAdmin, loadInvites, loadRooms, navigate]);
+
+  useEffect(() => {
+    activeRoomIdRef.current = activeRoom?.id || null;
+    loadMessages(activeRoom?.id);
+  }, [activeRoom?.id, loadMessages]);
 
   useEffect(() => {
     if (isAdmin) return undefined;
     const client = connectChatSocket({
+      onConnected: () => setSocketReady(true),
       onMatch: (event) => {
-        if (event?.status === "ENDED") {
-          if (Number(event?.chatRoomId) === Number(selectedRoomIdRef.current)) {
-            matchedRoomIdRef.current = null;
-            setSelectedRoom(null);
-            setMessages([]);
-            setMatchState("idle");
-            loadRooms();
-            toast("The random conversation has ended.");
-          }
+        if (event?.status === "ROOM_UPDATED" && event?.chatRoom?.id) {
+          const updated = event.chatRoom;
+          setRooms((current) => [updated, ...current.filter((room) => Number(room.id) !== Number(updated.id))]);
+          if (Number(activeRoomIdRef.current) === Number(updated.id)) setActiveRoom(updated);
           return;
         }
-        if (event?.status !== "MATCHED" || !event?.chatRoom?.id) return;
-        const room = event.chatRoom;
-        if (Number(matchedRoomIdRef.current) === Number(room.id)) return;
-        matchedRoomIdRef.current = room.id;
-        setChatRooms((prev) => [room, ...prev.filter((item) => Number(item?.id) !== Number(room.id))]);
-        setSelectedRoomType(normalizeRoomType(room));
-        setSelectedRoom(room);
-        setMatchState("matched");
-        setMessages([]);
-        toast.success("You have been matched. Say hello!");
+        if (event?.status === "LEFT" && Number(event?.chatRoomId) === Number(activeRoomIdRef.current)) {
+          activeRoomIdRef.current = null;
+          sessionStorage.removeItem(ACTIVE_ROOM_STORAGE_KEY);
+          setActiveRoom(null);
+          setActiveMode("community");
+          setMessages([]);
+          loadRooms();
+        }
       },
       onMessage: (message) => {
-        if (Number(message?.chatRoomId) !== Number(selectedRoomIdRef.current)) return;
-        setMessages((prev) => {
-          const duplicate = message?.id && prev.some((item) => Number(item?.id) === Number(message.id));
-          return duplicate ? prev : [...prev, message];
+        if (Number(message?.chatRoomId) !== Number(activeRoomIdRef.current)) return;
+        setMessages((current) => {
+          if (message?.id && current.some((item) => Number(item?.id) === Number(message.id))) return current;
+          return [...current, message];
         });
       },
-      onDisconnect: () => {
-        setMatchState((current) => current === "waiting" ? "idle" : current);
-      },
+      onInvitesChanged: loadInvites,
+      onRoomsChanged: () => loadRooms(),
+      onDisconnect: () => setSocketReady(false),
     });
-    chatSocketRef.current = client;
+    socketRef.current = client;
     return () => {
-      chatSocketRef.current = null;
+      setSocketReady(false);
+      socketRef.current = null;
       client?.deactivate();
     };
-  }, [isAdmin]);
+  }, [isAdmin, loadInvites, loadRooms]);
 
   useEffect(() => {
-    selectedRoomIdRef.current = selectedRoom?.id || null;
-  }, [selectedRoom?.id]);
-
-  useEffect(() => {
-    if (invitesApiBroken) return;
-    const interval = setInterval(loadInvites, 10000);
-    return () => clearInterval(interval);
-  }, [invitesApiBroken]);
-
-  useEffect(() => {
-    if (!selectedRoom?.id) return;
-    loadMessages(selectedRoom.id, { silent: false });
-    const interval = setInterval(() => loadMessages(selectedRoom.id, { silent: true }), 5000);
-    return () => clearInterval(interval);
-  }, [selectedRoom?.id]);
-
-  useEffect(() => {
-    if (!chatRooms.length) return;
-    const interval = setInterval(async () => {
-      for (const room of chatRooms) {
-        const roomId = Number(room?.id || 0);
-        if (!roomId) continue;
-        const roomType = normalizeRoomType(room);
-        if (!ROOM_KEY_SET.has(roomType)) continue;
-        if (selectedRoom?.id && Number(selectedRoom.id) === roomId) continue;
-        try {
-          const res = await api.get(`/messages/chatroom/${roomId}`);
-          const data = res.data?.content ?? res.data;
-          const list = Array.isArray(data) ? data : [];
-          if (!list.length) continue;
-          const last = list[list.length - 1];
-          const key = getMessageKey(last);
-          if (!key) continue;
-          const prevKey = roomLatestRef.current[roomId];
-          roomLatestRef.current[roomId] = key;
-          if (!prevKey || prevKey === key) continue;
-          if (getMessageSender(last) === myUsername) continue;
-          setRoomUnread((prev) => ({ ...prev, [roomType]: (prev[roomType] || 0) + 1 }));
-        } catch {}
-      }
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [chatRooms, myUsername, selectedRoom?.id]);
-
-  useEffect(() => {
-    if (!selectedRoom?.id) return;
-    if (invitedByRoomId && Number(selectedRoom.id) !== Number(invitedByRoomId)) {
-      setInvitedByNotice("");
-      setInvitedByRoomId(null);
-    }
-  }, [selectedRoom?.id, invitedByRoomId]);
-
-  useEffect(() => {
-    let active = true;
-    const roomId = Number(selectedRoom?.id || 0);
-    if (!roomId) {
-      setSelectedRoomPeers([]);
-      return;
-    }
-    (async () => {
+    if (activeMode !== "random" || !activeRoom?.id) return undefined;
+    let stopped = false;
+    const sendHeartbeat = async () => {
       try {
-        const participants = await fetchRoomParticipants(roomId);
-        if (!active) return;
-        const usernames = participants
-          .map((entry) => {
-            if (typeof entry === "string") return entry;
-            if (!entry || typeof entry !== "object") return "";
-            return (
-              entry?.username ||
-              entry?.user?.username ||
-              entry?.participant?.username ||
-              entry?.member?.username ||
-              ""
-            );
-          })
-          .map((name) => String(name || "").trim())
-          .filter(Boolean)
-          .filter((name) => name.toLowerCase() !== myUsername);
-        setSelectedRoomPeers(Array.from(new Set(usernames)));
-      } catch {
-        if (!active) return;
-        setSelectedRoomPeers([]);
+        await api.post("/chatrooms/random-heartbeat", { roomId: activeRoom.id });
+      } catch (error) {
+        if (!stopped && Number(error?.response?.status) === 403) await loadRooms();
       }
-    })();
-    return () => {
-      active = false;
     };
-  }, [selectedRoom?.id, myUsername]);
+    sendHeartbeat();
+    const interval = window.setInterval(sendHeartbeat, 60000);
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [activeMode, activeRoom?.id, loadRooms]);
 
   useEffect(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    if (shouldFollowRef.current) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!emojiOpen) return;
-    const onWindowClick = () => setEmojiOpen(false);
-    window.addEventListener("click", onWindowClick);
-    return () => window.removeEventListener("click", onWindowClick);
-  }, [emojiOpen]);
+  const handleViewportScroll = () => {
+    const element = messageViewportRef.current;
+    if (!element) return;
+    shouldFollowRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 90;
+  };
 
-  const displayedRooms = useMemo(() => {
-    return chatRooms.filter((room) => {
-      const type = normalizeRoomType(room);
-      return type === selectedRoomType && isConversationRoom(room);
-    });
-  }, [chatRooms, selectedRoomType]);
-
-  const activeChatTitle = useMemo(() => {
-    return `${selectedRoomMeta.icon} ${selectedRoomMeta.name}`;
-  }, [selectedRoomMeta.icon, selectedRoomMeta.name]);
-
-  const activeChatSubtitle = useMemo(() => {
-    return selectedRoomMeta.description;
-  }, [selectedRoomMeta.description]);
-
-  const activeSidebarPeer = useMemo(() => {
-    return selectedRoomPeers[0] || "";
-  }, [selectedRoomPeers]);
-
-  useEffect(() => {
-    if (matchState === "waiting") return;
-    if (selectedRoom?.id && displayedRooms.some((r) => r.id === selectedRoom.id)) return;
-    setSelectedRoom(displayedRooms[0] || null);
-    setMatchState(displayedRooms.length ? "matched" : "idle");
-    if (!displayedRooms.length) setMessages([]);
-  }, [displayedRooms, selectedRoom?.id, matchState]);
-
-  const handleSend = async () => {
-    if (!inputValue.trim()) return;
-    if (!selectedRoom?.id) {
-      toast.error("There is no open conversation here yet. Press Enter Random Conversation.");
-      return;
-    }
-    if (!isRoomAllowed(selectedRoomType)) {
-      if (selectedRoomType === "LATE_NIGHT") {
-        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
-        return;
-      }
-      openPaywall("Access restricted. Join the Inner Circle.");
-      return;
-    }
-    const senderId = getStoredUserId();
-    if (!senderId) {
-      toast.error("Please sign in to send messages.");
+  const handleSend = () => {
+    const content = input.trim();
+    if (!content || !activeRoom?.id || !socketRef.current?.connected) {
+      if (!socketRef.current?.connected) toast.error("Chat is reconnecting. Try again in a moment.");
       return;
     }
     try {
-      publishChatMessage(chatSocketRef.current, selectedRoom.id, inputValue, user?.username || "user");
-      markStreakActivity(user);
-      setInputValue("");
-      const roomType = normalizeRoomType(selectedRoom);
-      if (ROOM_KEY_SET.has(roomType)) {
-        setRoomUnread((prev) => ({ ...prev, [roomType]: 0 }));
-      }
-    } catch (err) {
-      console.error(err);
-      const msg = err?.response?.data?.error || "Unable to send message";
-      if (isFreeLimitError(err)) {
-        openPaywall(msg);
-      } else {
-        toast.error(msg);
-      }
+      publishChatMessage(socketRef.current, activeRoom.id, content, user?.username || "Anonymous");
+      setInput("");
+      shouldFollowRef.current = true;
+    } catch (error) {
+      toast.error(error?.message || "Unable to send message");
     }
   };
 
-  const handleLeaveRoom = async (roomId) => {
-    if (!roomId || isAdmin) return;
+  const enterRandom = async () => {
+    if (randomOperationRef.current) return;
+    if (randomRoom) {
+      selectRoom(randomRoom, "random");
+      return;
+    }
+    randomOperationRef.current = true;
+    setRandomBusy(true);
     try {
-      await api.delete(`/chatrooms/${roomId}/leave`);
-      setChatRooms((prev) => prev.filter((r) => r.id !== roomId));
-      if (selectedRoom?.id === roomId) {
-        setSelectedRoom(null);
-        setMessages([]);
-      }
-      toast.success("Conversation removed");
-    } catch (err) {
-      console.error(err);
-      const status = Number(err?.response?.status || 0);
-      const backendMsg = err?.response?.data?.error || "";
-      if (status === 403 && String(backendMsg).toLowerCase().includes("only participants")) {
-        toast.error("Only participants can leave this chat");
-        await loadRooms();
-        return;
-      }
-      toast.error(backendMsg || "Unable to remove conversation");
+      const response = await api.post("/chatrooms/random-join", {});
+      const room = response.data?.chatRoom;
+      if (!room?.id) throw new Error("Random chat did not return a room");
+      setRooms((current) => [room, ...current.filter((item) => Number(item.id) !== Number(room.id))]);
+      selectRoom(room, "random");
+      toast.success("You joined a random group.");
+    } catch (error) {
+      toast.error(error?.response?.data?.error || error?.message || "Unable to enter Random Chat");
+    } finally {
+      randomOperationRef.current = false;
+      setRandomBusy(false);
     }
   };
 
-  const handleDeleteRoom = async (roomId) => {
-    if (!roomId || isAdmin) return;
+  const leaveRandom = async () => {
+    if (randomOperationRef.current || activeMode !== "random" || !activeRoom?.id) return;
+    randomOperationRef.current = true;
+    setRandomBusy(true);
     try {
-      await api.delete(`/chatrooms/${roomId}`);
-      setChatRooms((prev) => prev.filter((r) => r.id !== roomId));
-      if (selectedRoom?.id === roomId) {
-        setSelectedRoom(null);
-        setMessages([]);
-      }
-      toast.success("Conversation deleted");
-    } catch (err) {
-      const status = Number(err?.response?.status || 0);
-      if (status === 404 || status === 405) {
-        toast.error("Delete endpoint missing in backend: DELETE /chatrooms/{id}");
-        return;
-      }
-      toast.error(err?.response?.data?.error || "Unable to delete conversation");
+      await api.delete(`/chatrooms/${activeRoom.id}/leave`);
+      setRooms((current) => current.filter((room) => Number(room.id) !== Number(activeRoom.id)));
+      selectRoom(communityRoom, "community");
+      toast.success("You left Random Chat.");
+    } catch (error) {
+      toast.error(error?.response?.data?.error || "Unable to leave Random Chat");
+    } finally {
+      randomOperationRef.current = false;
+      setRandomBusy(false);
     }
   };
 
-  const formatMessageTime = (value) => {
-    if (!value) return "";
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return new Intl.DateTimeFormat("ro-RO", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(d);
+  const nextRandom = async () => {
+    if (randomOperationRef.current || activeMode !== "random" || !activeRoom?.id) return;
+    randomOperationRef.current = true;
+    setRandomBusy(true);
+    const previousId = activeRoom.id;
+    try {
+      const response = await api.post("/chatrooms/random-next", { currentRoomId: previousId });
+      const room = response.data?.chatRoom;
+      if (!room?.id) throw new Error("Unable to find another random group");
+      setRooms((current) => [room, ...current.filter((item) =>
+        Number(item.id) !== Number(previousId) && Number(item.id) !== Number(room.id))]);
+      selectRoom(room, "random");
+      toast.success("New random group joined.");
+    } catch (error) {
+      toast.error(error?.response?.data?.error || error?.message || "Unable to shuffle");
+      await loadRooms();
+    } finally {
+      randomOperationRef.current = false;
+      setRandomBusy(false);
+    }
   };
 
-  const renderMessage = (msg, idx) => {
-    const senderName = msg.sender?.username || msg.sender || msg.senderId || "Anonymous";
-    const content = msg.text || msg.content || msg.message || "";
-    const messageTime = formatMessageTime(msg.timestamp || msg.createdAt || msg.sentAt || msg.time);
+  const startPrivate = async (username = privateUsername) => {
+    const clean = String(username || "").trim();
+    if (!clean || privateBusy) return;
+    if (clean.toLowerCase() === myUsername) {
+      toast.error("Choose another anonymous user.");
+      return;
+    }
+    setPrivateBusy(true);
+    try {
+      await createChatroomWithFallback(clean);
+      setPrivateUsername("");
+      setStartPrivateOpen(false);
+      toast.success("Private chat request sent. The chat opens after acceptance.");
+      await loadRooms();
+    } catch (error) {
+      toast.error(error?.response?.data?.error || "Unable to send private chat request");
+    } finally {
+      setPrivateBusy(false);
+    }
+  };
+
+  const answerInvite = async (invite, accept) => {
+    setInviteBusy(invite.id);
+    try {
+      const result = accept ? await acceptChatInvite(invite.id) : await declineChatInvite(invite.id);
+      await loadInvites();
+      await loadRooms();
+      if (accept && result?.chatRoom?.id) selectRoom(result.chatRoom, "private");
+      toast.success(accept ? "Private chat accepted." : "Request declined.");
+    } catch (error) {
+      toast.error(error?.response?.data?.error || "Unable to respond to request");
+    } finally {
+      setInviteBusy(null);
+    }
+  };
+
+  const renderMessage = (message) => {
+    const name = senderName(message);
+    const mine = name.toLowerCase() === myUsername || Number(message?.senderId) === Number(user?.id);
+    const system = !message?.sender && !message?.senderId;
+    if (system) return <div key={message.id || message.timestamp} className="cv-system-message">{message.content}</div>;
     return (
-      <div key={msg.id || idx} className="chat-message">
-        <div className="chat-message__bubble">
-          <div className="chat-message__meta">
-            <UserIdentity username={String(senderName)} size="sm" textClassName="chat-message__meta-text" />
-          </div>
-          <div className="chat-message__text">{content}</div>
-          {messageTime && <div className="chat-message__time">{messageTime}</div>}
+      <article key={message.id || `${message.timestamp}-${name}`} className={`cv-message ${mine ? "is-mine" : "is-other"}`}>
+        {!mine && (
+          <button className="cv-message__sender" type="button" onClick={() => startPrivate(name)}>
+            <UserIdentity username={name} size="sm" />
+            <span>Continue privately</span>
+          </button>
+        )}
+        <div className="cv-message__bubble">
+          <p>{message.content}</p>
+          <time>{message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</time>
         </div>
-      </div>
+      </article>
     );
   };
 
-  const pendingInvitesCount = invites.length;
-
-  const handleInviteAction = async (invite, action) => {
-    const id = invite?.id;
-    if (!id) return;
-    setInvitesActionId(id);
-    try {
-      const data = action === "accept" ? await acceptChatInvite(id) : await declineChatInvite(id);
-      if (action === "accept") {
-        const acceptedRoom = data?.chatRoom || data?.room || data;
-        const acceptedRoomId = Number(data?.chatRoomId || acceptedRoom?.id || 0);
-        if (!acceptedRoomId) {
-          toast.error("Invite accept response missing chatRoomId.");
-          return;
-        }
-        const inviter = invite?.inviterUsername || invite?.inviter?.username || invite?.fromUsername || "";
-        if (inviter) {
-          setInvitedByNotice(inviter);
-          setInvitedByRoomId(acceptedRoomId);
-        }
-        if (acceptedRoom?.id) {
-          setSelectedRoom(acceptedRoom);
-          const acceptedType = normalizeRoomType(acceptedRoom);
-          if (ROOM_KEY_SET.has(acceptedType)) setSelectedRoomType(acceptedType);
-        } else {
-          try {
-            sessionStorage.setItem("cv_open_room_id", String(acceptedRoomId));
-          } catch {}
-        }
-        toast.success("Invitation accepted");
-        navigate("/chat");
-      } else {
-        toast.success("Invitation declined");
-      }
-      await Promise.all([loadInvites(), loadRooms()]);
-    } catch (err) {
-      console.error(err);
-      toast.error(err?.response?.data?.error || "Unable to update invitation");
-    } finally {
-      setInvitesActionId(null);
-    }
-  };
-
-  const handleEnterRandomConversation = async () => {
-    if (matchState === "waiting") {
-      try {
-        await api.delete("/chatrooms/random-waiting");
-        setMatchState("idle");
-      } catch (err) {
-        toast.error(err?.response?.data?.error || "Unable to leave the waiting queue");
-      }
-      return;
-    }
-    if (!isRoomAllowed(selectedRoomType)) {
-      if (selectedRoomType === "LATE_NIGHT") {
-        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
-      } else {
-        openPaywall("Access restricted. Join the Inner Circle.");
-      }
-      return;
-    }
-    setRandomLoading(true);
-    try {
-      const res = await api.post("/chatrooms/random-join", { roomType: selectedRoomType });
-      const result = res.data;
-      if (result?.status === "MATCHED" && result?.chatRoom?.id) {
-        const room = result.chatRoom;
-        const isNewMatch = Number(matchedRoomIdRef.current) !== Number(room.id);
-        matchedRoomIdRef.current = room.id;
-        setChatRooms((prev) => [room, ...prev.filter((item) => Number(item?.id) !== Number(room.id))]);
-        setSelectedRoom(room);
-        setMatchState("matched");
-        setMessages([]);
-        if (isNewMatch) toast.success("You have been matched. Say hello!");
-      } else {
-        setSelectedRoom(null);
-        setMessages([]);
-        setMatchState("waiting");
-      }
-    } catch (err) {
-      console.error(err);
-      const msg = err?.response?.data?.error || "Unable to enter random conversation";
-      if (String(err?.response?.data?.code || "").toUpperCase() === "PREMIUM_ROOM_REQUIRED") {
-        openPaywall(msg);
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setRandomLoading(false);
-    }
-  };
-
-  const handleAnalyzeMessage = async () => {
-    const text = String(inputValue || "").trim();
-    if (!text) {
-      toast.error("Write a message first.");
-      return;
-    }
-    const gate = tryConsumeAiUse(user);
-    if (!gate.ok) {
-      toast.error("Free plan: 3 AI uses/day. Upgrade for unlimited.");
-      return;
-    }
-    setQuotaTick((prev) => prev + 1);
-    setAnalyzingMessage(true);
-    try {
-      const analysis = await aiAnalyzeEmotion(text);
-      markStreakActivity(user);
-      setMessageAnalysis(analysis);
-    } catch (err) {
-      console.error(err);
-      toast.error(err?.response?.data?.error || "Unable to analyze message");
-    } finally {
-      setAnalyzingMessage(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    toast.error("Admin account cannot access chat.");
-    navigate("/admin", { replace: true });
-  }, [isAdmin, navigate]);
-
-  useEffect(() => {
-    if (isAdmin) return;
-    const interval = setInterval(() => {
-      loadSubscription();
-    }, 12000);
-    const onFocus = () => loadSubscription();
-    window.addEventListener("focus", onFocus);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [isAdmin]);
+  if (isAdmin) return null;
 
   return (
-    <div className="page chat-page space-y-8">
-      <section className="chat-luxe-shell">
-        <aside className="chat-luxe-sidebar">
-          <div>
-            <h2 className="chat-luxe-title">Messages</h2>
-            <p className="chat-luxe-subtitle">Join rooms for themed, anonymous conversations.</p>
+    <div className="page chat-page cv-chat-page">
+      <section className="cv-chat-shell">
+        <aside className="cv-chat-sidebar">
+          <header className="cv-chat-brand">
+            <span>CHAT</span>
+            <h1>Anonymous conversations</h1>
+          </header>
+
+          <div className="cv-primary-modes">
+            <button className={activeMode === "community" ? "is-active" : ""} onClick={() => selectRoom(communityRoom, "community")} disabled={!communityRoom}>
+              <Users size={19} />
+              <span><strong>Community</strong><small>Talk with everyone</small></span>
+            </button>
+            <button className={activeMode === "random" ? "is-active is-random" : "is-random"} onClick={enterRandom} disabled={randomBusy}>
+              <Shuffle size={19} />
+              <span><strong>{randomBusy ? "Joining…" : "Random Chat"}</strong><small>Meet a small anonymous group</small></span>
+            </button>
           </div>
 
-          <div className="chat-luxe-room-label">ROOMS</div>
-          <div className="space-y-2">
-            {ROOM_DEFINITIONS.map((room) => {
-              const allowed = isRoomAllowed(room.key);
-              const active = selectedRoomType === room.key;
-              const unreadCount = Number(roomUnread[room.key] || 0);
+          <div className="cv-sidebar-heading">
+            <span>PRIVATE CHATS</span>
+            {invites.length > 0 && <b>{invites.length}</b>}
+          </div>
+          <nav className="cv-private-list" aria-label="Private chats">
+            {loading && <div className="cv-sidebar-empty">Loading chats…</div>}
+            {!loading && privateRooms.length === 0 && <div className="cv-sidebar-empty">Accepted private chats appear here.</div>}
+            {privateRooms.map((room) => {
+              const label = privateRoomLabel(room);
               return (
-                <button
-                  key={room.key}
-                  type="button"
-                  className={`chat-room ${active ? "chat-room--active" : ""}`}
-                  onClick={async () => {
-                    if (!allowed) {
-                      if (room.key === "LATE_NIGHT") {
-                        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
-                        return;
-                      }
-                      if (room.premium) {
-                        const freshSub = await loadSubscription();
-                        if (hasProAccess(freshSub)) {
-                          setSelectedRoomType(room.key);
-                          return;
-                        }
-                      }
-                      openPremiumPreview();
-                      return;
-                    }
-                    if (matchState === "waiting") {
-                      try { await api.delete("/chatrooms/random-waiting"); } catch {}
-                      setMatchState("idle");
-                    }
-                    setSelectedRoomType(room.key);
-                  }}
-                >
-                  <div className="chat-room-row">
-                    <div className="chat-room__title">
-                      {room.icon} {room.name}{" "}
-                      {room.premium ? (isPro ? "\u{1F513}" : "\u{1F512}") : ""}
-                    </div>
-                    {unreadCount > 0 && <span className="chat-room-unread">{unreadCount > 99 ? "99+" : unreadCount}</span>}
-                    <span className={`chat-room-pill ${room.premium ? "is-pro is-inner-circle" : "is-free"}`}>
-                      {room.premium ? "PRO" : "FREE"}
-                    </span>
-                  </div>
+                <button key={room.id} className={Number(activeRoom?.id) === Number(room.id) ? "is-active" : ""} onClick={() => selectRoom(room, "private")}>
+                  <UserIdentity username={label} size="sm" />
                 </button>
               );
             })}
-          </div>
+          </nav>
 
-          <div className="chat-luxe-room-label">ACTIVE CHAT</div>
-          <div className="chat-active-preview">
-            {selectedRoom?.id ? (
-              <>
-                <button
-                  type="button"
-                  className="chat-active-preview__main"
-                  onClick={() => setSelectedRoom(selectedRoom)}
-                  title="Open active chat"
-                >
-                  {activeSidebarPeer ? (
-                    <UserIdentity username={activeSidebarPeer} size="sm" textClassName="chat-active-preview__name" />
-                  ) : (
-                    <UserIdentity user={user} size="sm" textClassName="chat-active-preview__name" />
-                  )}
-                  <div className="chat-active-preview__meta">{getRoomLabel(selectedRoom)}</div>
-                </button>
-                {!isAdmin && (
-                  <div className="chat-active-preview__actions">
-                    <button
-                      type="button"
-                      className="chat-active-preview__delete"
-                      onClick={() => handleDeleteRoom(selectedRoom.id)}
-                      title="Delete conversation"
-                    >
-                      Delete
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-active-preview__leave"
-                      onClick={() => handleLeaveRoom(selectedRoom.id)}
-                      title="Leave conversation"
-                    >
-                      Leave
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="chat-active-preview__empty">There are no active conversations yet for the selected room.</div>
-            )}
-          </div>
-
-          <div className="chat-luxe-sidebar-footer">
-            <button
-              className="chat-luxe-random-btn"
-              onClick={handleEnterRandomConversation}
-              disabled={randomLoading}
-            >
-              {randomLoading ? "Joining..." : matchState === "waiting" ? "Cancel waiting" : "Enter Random Conversation"}
-            </button>
-            <button className="chat-luxe-upgrade-btn" onClick={() => navigate("/subscriptions")}>
-              Upgrade
-            </button>
-          </div>
+          <button className="cv-start-private" onClick={() => setStartPrivateOpen(true)}><UserPlus size={17} /> Start Private Chat</button>
+          <button className="cv-invites-button" onClick={() => setInvitesOpen(true)}><Bell size={16} /> Requests {invites.length > 0 && <b>{invites.length}</b>}</button>
+          {!user?.premium && <button className="cv-upgrade-button" onClick={() => navigate("/subscriptions")}>Upgrade to Premium</button>}
         </aside>
 
-        <main className="chat-luxe-main">
-          <div className="chat-luxe-main-head">
+        <main className="cv-chat-main">
+          <header className="cv-chat-header">
             <div>
-              <h2 className="chat-luxe-main-title">{activeChatTitle}</h2>
-              <p className="chat-luxe-subtitle">{activeChatSubtitle}</p>
-              {invitedByNotice && selectedRoom?.id && invitedByRoomId && Number(selectedRoom.id) === Number(invitedByRoomId) && (
-                <p className="chat-luxe-invite-note">Invited by {invitedByNotice}</p>
+              <span className="cv-chat-kicker">{activeMode === "private" ? "PRIVATE CHAT" : activeMode.toUpperCase()}</span>
+              <h2>{roomLabel}</h2>
+              <p>{activeMode === "random"
+                ? `${activeRoom?.participants?.length || 1} ${activeRoom?.participants?.length === 1 ? "person" : "people"} here · maximum 6`
+                : activeMode === "community" ? "One shared space for the ConfessionVerse community" : "Anonymous and visible only to participants"}</p>
+            </div>
+            <div className="cv-chat-header__actions">
+              <span className={`cv-live-state ${socketReady ? "is-online" : ""}`}>{socketReady ? "Live" : "Reconnecting"}</span>
+              {activeMode === "random" && activeRoom?.id && (
+                <>
+                  <button onClick={nextRandom} disabled={randomBusy}><Shuffle size={16} /> Next</button>
+                  <button className="is-danger" onClick={leaveRandom} disabled={randomBusy}><LogOut size={16} /> Leave</button>
+                </>
               )}
+              <button className="is-icon" onClick={() => loadRooms()} aria-label="Refresh chats"><RefreshCw size={16} /></button>
             </div>
-            <div className="chat-luxe-head-actions">
-              <span style={{ flex: 1 }} />
-              <button
-                className="chat-luxe-refresh"
-                onClick={handleOpenAddUser}
-                aria-label="Add user"
-                title="Add user"
-              >
-                <UserPlus size={15} />
-              </button>
-              <button
-                className="chat-luxe-refresh"
-                onClick={() => setInvitesOpen(true)}
-                aria-label="Open invites"
-                title="Invites"
-              >
-                <Bell size={15} />
-                {pendingInvitesCount > 0 && <span className="chat-invite-badge">{pendingInvitesCount}</span>}
-              </button>
-              <button className="chat-luxe-refresh" onClick={loadRooms} aria-label="Refresh rooms">
-                <RotateCw size={15} />
-              </button>
-            </div>
-          </div>
+          </header>
 
-          <div ref={messagesContainerRef} className="chat-thread__messages">
-            {loadingMessages && (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-16 skeleton"></div>
-                ))}
-              </div>
+          <div className="cv-message-viewport" ref={messageViewportRef} onScroll={handleViewportScroll}>
+            {messagesLoading && <div className="cv-chat-empty">Loading conversation…</div>}
+            {!messagesLoading && !activeRoom?.id && activeMode === "random" && (
+              <div className="cv-chat-empty"><Shuffle size={30} /><h3>Ready to meet a random group?</h3><p>Rooms hold up to six anonymous people.</p><button onClick={enterRandom}>Enter Random Chat</button></div>
             )}
-            {!loadingMessages && errorMessages && <div className="text-sm text-rose-600">{errorMessages}</div>}
-            {!loadingMessages && !errorMessages && !selectedRoom?.id && (
-              <div className="text-sm text-amber-300">
-                {matchState === "waiting"
-                  ? "Waiting for someone to join..."
-                  : "There is no open conversation yet for the selected room. Press Enter Random Conversation."}
-              </div>
+            {!messagesLoading && activeRoom?.id && messages.length === 0 && (
+              <div className="cv-chat-empty"><h3>No messages yet</h3><p>Start the conversation when you are ready.</p></div>
             )}
-            {!loadingMessages && !errorMessages && messages.length === 0 && (
-              <div className="text-sm text-slate-600">No messages yet. Start the conversation.</div>
-            )}
-            {!loadingMessages && !errorMessages && messages.map(renderMessage)}
+            {!messagesLoading && messages.map(renderMessage)}
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="chat-luxe-composer">
-            <div className="chat-luxe-tools">
-              <button
-                type="button"
-                className="chat-luxe-tool-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEmojiOpen((prev) => !prev);
-                }}
-                aria-label="Insert emoji"
-                title="Insert emoji"
-                disabled={matchState !== "matched" || !selectedRoom?.id}
-              >
-                <Smile size={15} />
-              </button>
-              {emojiOpen && (
-                <div className="chat-luxe-emoji-menu" onClick={(e) => e.stopPropagation()}>
-                  {emojis.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      className={`chat-luxe-emoji-item ${selectedEmoji === emoji ? "is-active" : ""}`}
-                      onClick={() => {
-                        setSelectedEmoji(emoji);
-                        setInputValue((prev) => `${prev}${emoji}`);
-                        setEmojiOpen(false);
-                      }}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="chat-luxe-input-wrap">
-              <input
-                type="text"
-                className="input"
-                placeholder={matchState === "waiting" ? "Waiting for someone to join..." : selectedRoom?.id ? "Take your time..." : "There is no open conversation. Press Enter Random Conversation."}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSend();
-                }}
-                maxLength={300}
-                disabled={matchState !== "matched" || !selectedRoom?.id}
-              />
-            </div>
-            <button className="chat-luxe-send" onClick={handleSend} disabled={matchState !== "matched" || !selectedRoom?.id}>
-              <Send size={15} />
-            </button>
-          </div>
-
-          <div className="chat-ai-inline">
-            <button
-              type="button"
-              className="chat-ai-inline__btn"
-              onClick={handleAnalyzeMessage}
-              disabled={analyzingMessage || !inputValue.trim() || aiLocked}
-            >
-              {analyzingMessage ? "Analyzing..." : "Analyze message"}
-            </button>
-            <span className="chat-ai-inline__quota">
-              {aiQuota.isPro ? "AI unlimited" : `AI used today: ${aiQuota.used}/3`}
-            </span>
-            {aiLocked && (
-              <button type="button" className="chat-ai-inline__upgrade" onClick={() => navigate("/subscriptions")}>
-                Unlock AI
-              </button>
-            )}
-          </div>
-
-          {messageAnalysis && <div className="chat-ai-inline__result">{messageAnalysis}</div>}
+          <footer className="cv-composer">
+            <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) handleSend(); }} placeholder={activeRoom?.id ? `Message ${roomLabel}` : "Choose or enter a chat"} maxLength={500} disabled={!activeRoom?.id} />
+            <button onClick={handleSend} disabled={!input.trim() || !activeRoom?.id || !socketReady} aria-label="Send message"><Send size={18} /></button>
+          </footer>
         </main>
       </section>
 
-      {paywallOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
-          <div className="card card-body max-w-lg w-full space-y-4">
-            <h3 className="text-xl font-semibold text-slate-100">Access restricted</h3>
-            <p className="text-sm text-slate-300">{paywallMessage}</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="premium-modal__cta"
-                onClick={() => {
-                  setPaywallOpen(false);
-                  navigate("/subscriptions");
-                }}
-              >
-                Join the Inner Circle
-              </button>
-              <button className="premium-modal__ghost" onClick={() => setPaywallOpen(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {premiumPreviewOpen && (
-        <div className="fixed inset-0 z-[91] flex items-center justify-center bg-black/65 p-4">
-          <div className="card card-body max-w-lg w-full space-y-4 premium-preview">
-            <div className="premium-preview__eyebrow">Inner Circle Preview</div>
-            <h3 className="text-xl font-semibold text-slate-100">Premium Room</h3>
-            <div className="premium-preview__chat">
-              <div className="premium-preview__msg">I did not expect this chat to feel this safe.</div>
-              <div className="premium-preview__msg is-right">You can say hard things here. No judgement.</div>
-              <div className="premium-preview__msg">It feels calmer than public rooms.</div>
-            </div>
-            <p className="text-sm text-slate-300">Access restricted. Join the Inner Circle.</p>
-            <div className="flex flex-wrap gap-2">
-              <button
-                className="premium-modal__cta"
-                onClick={() => {
-                  setPremiumPreviewOpen(false);
-                  navigate("/subscriptions");
-                }}
-              >
-                Join the Inner Circle
-              </button>
-              <button className="premium-modal__ghost" onClick={() => setPremiumPreviewOpen(false)}>
-                Not now
-              </button>
-            </div>
-          </div>
+      {startPrivateOpen && (
+        <div className="cv-modal-backdrop" onMouseDown={() => setStartPrivateOpen(false)}>
+          <form className="cv-modal" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); startPrivate(); }}>
+            <span className="cv-chat-kicker">PRIVATE CHAT REQUEST</span>
+            <h3>Continue privately</h3>
+            <p>The conversation is created only after the other person accepts.</p>
+            <input autoFocus value={privateUsername} onChange={(event) => setPrivateUsername(event.target.value)} placeholder="Anonymous username" maxLength={50} />
+            <div><button type="button" className="is-secondary" onClick={() => setStartPrivateOpen(false)}>Cancel</button><button disabled={privateBusy || !privateUsername.trim()}>{privateBusy ? "Sending…" : "Send request"}</button></div>
+          </form>
         </div>
       )}
 
       {invitesOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
-          <div className="card card-body max-w-xl w-full space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl font-semibold text-slate-100">Chat Invitations</h3>
-              <button className="btn btn-secondary" onClick={() => setInvitesOpen(false)}>
-                Close
-              </button>
+        <div className="cv-modal-backdrop" onMouseDown={() => setInvitesOpen(false)}>
+          <section className="cv-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <span className="cv-chat-kicker">PRIVATE CHATS</span>
+            <h3>Chat requests</h3>
+            {invites.length === 0 && <p>No pending requests.</p>}
+            <div className="cv-invite-list">
+              {invites.map((invite) => (
+                <div key={invite.id}><UserIdentity username={invite.inviterUsername || "Anonymous"} size="sm" /><span><button className="is-secondary" disabled={inviteBusy === invite.id} onClick={() => answerInvite(invite, false)}>Decline</button><button disabled={inviteBusy === invite.id} onClick={() => answerInvite(invite, true)}>Accept</button></span></div>
+              ))}
             </div>
-
-            {invitesLoading && <p className="text-sm text-slate-400">Loading invitations...</p>}
-            {!invitesLoading && invitesApiBroken && (
-              <p className="text-sm text-rose-400">Invites service unavailable right now.</p>
-            )}
-            {!invitesLoading && !invitesApiBroken && invites.length === 0 && (
-              <p className="text-sm text-slate-400">No pending invitations.</p>
-            )}
-
-            {!invitesLoading && !invitesApiBroken && invites.length > 0 && (
-              <div className="space-y-2">
-                {invites.map((inv) => {
-                  const inviter = inv?.inviterUsername || inv?.inviter?.username || inv?.fromUsername || "User";
-                  const busy = invitesActionId === inv?.id;
-                  return (
-                    <div key={inv?.id || inviter} className="card card-body space-y-2">
-                      <div className="text-sm text-slate-200">
-                        <strong>{inviter}</strong> invited you to chat
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          className="btn btn-primary"
-                          disabled={busy}
-                          onClick={() => handleInviteAction(inv, "accept")}
-                        >
-                          {busy ? "..." : "Accept"}
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          disabled={busy}
-                          onClick={() => handleInviteAction(inv, "decline")}
-                        >
-                          {busy ? "..." : "Decline"}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {addUserOpen && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4">
-          <div className="card card-body max-w-md w-full space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl font-semibold text-slate-100">Add User</h3>
-              <button
-                className="btn btn-secondary"
-                onClick={() => {
-                  setAddUserOpen(false);
-                  setSearchError("");
-                  setUserSuggestions([]);
-                  setUserSuggestionsError("");
-                }}
-              >
-                Close
-              </button>
-            </div>
-            <p className="text-sm text-slate-400">Search for a user in the database and send an invite to the selected room.</p>
-            <form className="space-y-3" onSubmit={handleSubmitAddUser}>
-              <input
-                type="text"
-                className="input"
-                placeholder="Search username..."
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  if (searchError) setSearchError("");
-                }}
-                maxLength={50}
-                autoFocus
-              />
-              {userSuggestionsLoading && <p className="text-sm text-slate-400">Searching users...</p>}
-              {!userSuggestionsLoading && userSuggestionsError && <p className="text-sm text-rose-400">{userSuggestionsError}</p>}
-              {!userSuggestionsLoading && !userSuggestionsError && String(searchQuery || "").trim().length >= 2 && (
-                <div className="max-h-44 overflow-y-auto rounded-lg border border-white/10 bg-black/20">
-                  {userSuggestions.length > 0 ? (
-                    <div className="divide-y divide-white/10">
-                      {userSuggestions.map((name) => (
-                        <div key={name} className="flex items-center justify-between gap-2 px-3 py-2">
-                          <button
-                            type="button"
-                            className="text-sm text-slate-200 hover:text-white"
-                            onClick={() => {
-                              setSearchQuery(name);
-                              setSearchError("");
-                            }}
-                          >
-                            {name}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
-                            disabled={inviteSubmitting}
-                            onClick={() => handleAddSuggestedUser(name)}
-                          >
-                            Add
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="px-3 py-2 text-sm text-slate-400">No users found.</p>
-                  )}
-                </div>
-              )}
-              {searchError && <p className="text-sm text-rose-400">{searchError}</p>}
-              <button className="btn btn-primary w-full" type="submit" disabled={inviteSubmitting}>
-                {inviteSubmitting ? "Sending..." : "Send invite"}
-              </button>
-            </form>
-          </div>
+            <div><button className="is-secondary" onClick={() => setInvitesOpen(false)}>Close</button></div>
+          </section>
         </div>
       )}
     </div>
