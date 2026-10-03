@@ -10,6 +10,7 @@ import { getMySubscription } from "../services/BillingService.jsx";
 import { aiAnalyzeEmotion } from "../services/aiAssistService.js";
 import { getAiQuotaState, tryConsumeAiUse } from "../services/aiQuotaService.js";
 import { markStreakActivity } from "../services/streakService.js";
+import { connectChatSocket, publishChatMessage } from "../services/chatSocketService.js";
 import {
   acceptChatInvite,
   createChatInvite,
@@ -82,6 +83,7 @@ export default function ChatPage() {
   const [paywallMessage, setPaywallMessage] = useState("Access restricted. Join the Inner Circle.");
   const [premiumPreviewOpen, setPremiumPreviewOpen] = useState(false);
   const [randomLoading, setRandomLoading] = useState(false);
+  const [matchState, setMatchState] = useState("idle");
   const [roomUnread, setRoomUnread] = useState({});
   const [selectedRoomPeers, setSelectedRoomPeers] = useState([]);
   const [messageAnalysis, setMessageAnalysis] = useState("");
@@ -91,6 +93,9 @@ export default function ChatPage() {
   const messagesContainerRef = useRef(null);
   const roomLatestRef = useRef({});
   const roomMessageSigRef = useRef({});
+  const chatSocketRef = useRef(null);
+  const selectedRoomIdRef = useRef(null);
+  const matchedRoomIdRef = useRef(null);
   const seenStorageKey = `cv_seen_room_last_${String(user?.id || user?.username || "anon")}`;
   const emojis = useMemo(
     () => [
@@ -150,6 +155,11 @@ export default function ChatPage() {
   };
 
   const normalizeRoomType = (room) => String(room?.roomType || "").toUpperCase();
+
+  const isConversationRoom = (room) => {
+    const participants = Array.isArray(room?.participants) ? room.participants : [];
+    return !!room?.creator && participants.length >= 2;
+  };
 
   const getMessageKey = (msg) => String(msg?.id || msg?.timestamp || msg?.createdAt || msg?.sentAt || msg?.time || "");
 
@@ -499,6 +509,54 @@ export default function ChatPage() {
   }, [isAdmin]);
 
   useEffect(() => {
+    if (isAdmin) return undefined;
+    const client = connectChatSocket({
+      onMatch: (event) => {
+        if (event?.status === "ENDED") {
+          if (Number(event?.chatRoomId) === Number(selectedRoomIdRef.current)) {
+            matchedRoomIdRef.current = null;
+            setSelectedRoom(null);
+            setMessages([]);
+            setMatchState("idle");
+            loadRooms();
+            toast("The random conversation has ended.");
+          }
+          return;
+        }
+        if (event?.status !== "MATCHED" || !event?.chatRoom?.id) return;
+        const room = event.chatRoom;
+        if (Number(matchedRoomIdRef.current) === Number(room.id)) return;
+        matchedRoomIdRef.current = room.id;
+        setChatRooms((prev) => [room, ...prev.filter((item) => Number(item?.id) !== Number(room.id))]);
+        setSelectedRoomType(normalizeRoomType(room));
+        setSelectedRoom(room);
+        setMatchState("matched");
+        setMessages([]);
+        toast.success("You have been matched. Say hello!");
+      },
+      onMessage: (message) => {
+        if (Number(message?.chatRoomId) !== Number(selectedRoomIdRef.current)) return;
+        setMessages((prev) => {
+          const duplicate = message?.id && prev.some((item) => Number(item?.id) === Number(message.id));
+          return duplicate ? prev : [...prev, message];
+        });
+      },
+      onDisconnect: () => {
+        setMatchState((current) => current === "waiting" ? "idle" : current);
+      },
+    });
+    chatSocketRef.current = client;
+    return () => {
+      chatSocketRef.current = null;
+      client?.deactivate();
+    };
+  }, [isAdmin]);
+
+  useEffect(() => {
+    selectedRoomIdRef.current = selectedRoom?.id || null;
+  }, [selectedRoom?.id]);
+
+  useEffect(() => {
     if (invitesApiBroken) return;
     const interval = setInterval(loadInvites, 10000);
     return () => clearInterval(interval);
@@ -600,7 +658,7 @@ export default function ChatPage() {
   const displayedRooms = useMemo(() => {
     return chatRooms.filter((room) => {
       const type = normalizeRoomType(room);
-      return type === selectedRoomType;
+      return type === selectedRoomType && isConversationRoom(room);
     });
   }, [chatRooms, selectedRoomType]);
 
@@ -617,10 +675,12 @@ export default function ChatPage() {
   }, [selectedRoomPeers]);
 
   useEffect(() => {
+    if (matchState === "waiting") return;
     if (selectedRoom?.id && displayedRooms.some((r) => r.id === selectedRoom.id)) return;
     setSelectedRoom(displayedRooms[0] || null);
+    setMatchState(displayedRooms.length ? "matched" : "idle");
     if (!displayedRooms.length) setMessages([]);
-  }, [displayedRooms, selectedRoom?.id]);
+  }, [displayedRooms, selectedRoom?.id, matchState]);
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -642,16 +702,9 @@ export default function ChatPage() {
       return;
     }
     try {
-      const res = await api.post(`/messages`, {
-        chatRoomId: selectedRoom.id,
-        senderId,
-        content: inputValue,
-      });
-      setMessages((prev) => [...prev, res.data]);
+      publishChatMessage(chatSocketRef.current, selectedRoom.id, inputValue, user?.username || "user");
       markStreakActivity(user);
       setInputValue("");
-      const ownKey = getMessageKey(res.data);
-      if (ownKey) markRoomSeen(selectedRoom.id, ownKey);
       const roomType = normalizeRoomType(selectedRoom);
       if (ROOM_KEY_SET.has(roomType)) {
         setRoomUnread((prev) => ({ ...prev, [roomType]: 0 }));
@@ -784,35 +837,49 @@ export default function ChatPage() {
   };
 
   const handleEnterRandomConversation = async () => {
+    if (matchState === "waiting") {
+      try {
+        await api.delete("/chatrooms/random-waiting");
+        setMatchState("idle");
+      } catch (err) {
+        toast.error(err?.response?.data?.error || "Unable to leave the waiting queue");
+      }
+      return;
+    }
+    if (!isRoomAllowed(selectedRoomType)) {
+      if (selectedRoomType === "LATE_NIGHT") {
+        toast.error('"Late Night" is active only at night (22:00 - 06:00).');
+      } else {
+        openPaywall("Access restricted. Join the Inner Circle.");
+      }
+      return;
+    }
     setRandomLoading(true);
     try {
-      let rooms = chatRooms;
-      if (!rooms.length) {
-        const res = await api.get("/chatrooms");
-        rooms = Array.isArray(res.data) ? res.data : Array.isArray(res.data?.content) ? res.data.content : [];
-        setChatRooms(rooms);
+      const res = await api.post("/chatrooms/random-join", { roomType: selectedRoomType });
+      const result = res.data;
+      if (result?.status === "MATCHED" && result?.chatRoom?.id) {
+        const room = result.chatRoom;
+        const isNewMatch = Number(matchedRoomIdRef.current) !== Number(room.id);
+        matchedRoomIdRef.current = room.id;
+        setChatRooms((prev) => [room, ...prev.filter((item) => Number(item?.id) !== Number(room.id))]);
+        setSelectedRoom(room);
+        setMatchState("matched");
+        setMessages([]);
+        if (isNewMatch) toast.success("You have been matched. Say hello!");
+      } else {
+        setSelectedRoom(null);
+        setMessages([]);
+        setMatchState("waiting");
       }
-
-      const eligible = rooms.filter((room) => {
-        const type = normalizeRoomType(room);
-        return ROOM_KEY_SET.has(type) && isRoomAllowed(type);
-      });
-
-      if (!eligible.length) {
-        toast.error("No active conversations available right now.");
-        return;
-      }
-
-      const randomRoom = eligible[Math.floor(Math.random() * eligible.length)];
-      const randomType = normalizeRoomType(randomRoom);
-      if (ROOM_KEY_SET.has(randomType)) {
-        setSelectedRoomType(randomType);
-      }
-      setSelectedRoom(randomRoom);
-      toast.success("Random conversation opened");
     } catch (err) {
       console.error(err);
-      toast.error("Unable to open a random conversation");
+      const msg = err?.response?.data?.error || "Unable to enter random conversation";
+      if (String(err?.response?.data?.code || "").toUpperCase() === "PREMIUM_ROOM_REQUIRED") {
+        openPaywall(msg);
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setRandomLoading(false);
     }
@@ -898,6 +965,10 @@ export default function ChatPage() {
                       openPremiumPreview();
                       return;
                     }
+                    if (matchState === "waiting") {
+                      try { await api.delete("/chatrooms/random-waiting"); } catch {}
+                      setMatchState("idle");
+                    }
                     setSelectedRoomType(room.key);
                   }}
                 >
@@ -965,7 +1036,7 @@ export default function ChatPage() {
               onClick={handleEnterRandomConversation}
               disabled={randomLoading}
             >
-              {randomLoading ? "Opening..." : "Enter Random Conversation"}
+              {randomLoading ? "Joining..." : matchState === "waiting" ? "Cancel waiting" : "Enter Random Conversation"}
             </button>
             <button className="chat-luxe-upgrade-btn" onClick={() => navigate("/subscriptions")}>
               Upgrade
@@ -1018,7 +1089,9 @@ export default function ChatPage() {
             {!loadingMessages && errorMessages && <div className="text-sm text-rose-600">{errorMessages}</div>}
             {!loadingMessages && !errorMessages && !selectedRoom?.id && (
               <div className="text-sm text-amber-300">
-                There is no open conversation yet for the selected room. Press Enter Random Conversation.
+                {matchState === "waiting"
+                  ? "Waiting for someone to join..."
+                  : "There is no open conversation yet for the selected room. Press Enter Random Conversation."}
               </div>
             )}
             {!loadingMessages && !errorMessages && messages.length === 0 && (
@@ -1039,6 +1112,7 @@ export default function ChatPage() {
                 }}
                 aria-label="Insert emoji"
                 title="Insert emoji"
+                disabled={matchState !== "matched" || !selectedRoom?.id}
               >
                 <Smile size={15} />
               </button>
@@ -1066,17 +1140,17 @@ export default function ChatPage() {
               <input
                 type="text"
                 className="input"
-                placeholder={selectedRoom?.id ? "Take your time..." : "There is no open conversation. Press Enter Random Conversation."}
+                placeholder={matchState === "waiting" ? "Waiting for someone to join..." : selectedRoom?.id ? "Take your time..." : "There is no open conversation. Press Enter Random Conversation."}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleSend();
                 }}
                 maxLength={300}
-                disabled={!selectedRoom?.id}
+                disabled={matchState !== "matched" || !selectedRoom?.id}
               />
             </div>
-            <button className="chat-luxe-send" onClick={handleSend} disabled={!selectedRoom?.id}>
+            <button className="chat-luxe-send" onClick={handleSend} disabled={matchState !== "matched" || !selectedRoom?.id}>
               <Send size={15} />
             </button>
           </div>
@@ -1285,4 +1359,3 @@ export default function ChatPage() {
     </div>
   );
 }
-
