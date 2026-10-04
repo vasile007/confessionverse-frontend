@@ -20,8 +20,14 @@ const modeForRoom = (room) => {
   return "private";
 };
 
-const senderName = (message) =>
-  String(message?.sender?.username || message?.senderUsername || message?.sender || "Anonymous");
+const senderIdentity = (message) => {
+  const sender = message?.sender;
+  const username = typeof sender === "object" && sender !== null
+    ? sender.username
+    : message?.senderUsername || (typeof sender === "string" ? sender : "");
+  const normalizedUsername = String(username || "").trim();
+  return normalizedUsername ? { username: normalizedUsername, user: typeof sender === "object" ? sender : null } : null;
+};
 const ACTIVE_ROOM_STORAGE_KEY = "cv_active_chat_room_id";
 
 export default function ChatPage() {
@@ -43,6 +49,8 @@ export default function ChatPage() {
   const [privateUsername, setPrivateUsername] = useState("");
   const [privateBusy, setPrivateBusy] = useState(false);
   const socketRef = useRef(null);
+  const socketGenerationRef = useRef(0);
+  const lastSocketErrorRef = useRef({ message: "", at: 0 });
   const activeRoomIdRef = useRef(null);
   const messageViewportRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -161,13 +169,17 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (isAdmin) return undefined;
+    const generation = ++socketGenerationRef.current;
+    const isCurrentSocket = () => socketGenerationRef.current === generation;
     const client = connectChatSocket({
       onConnected: () => {
+        if (!isCurrentSocket()) return;
         setSocketReady(true);
         loadInvites();
         loadRooms();
       },
       onMatch: (event) => {
+        if (!isCurrentSocket()) return;
         if (event?.status === "ROOM_UPDATED" && event?.chatRoom?.id) {
           const updated = event.chatRoom;
           setRooms((current) => [updated, ...current.filter((room) => Number(room.id) !== Number(updated.id))]);
@@ -184,21 +196,39 @@ export default function ChatPage() {
         }
       },
       onMessage: (message) => {
+        if (!isCurrentSocket()) return;
         if (Number(message?.chatRoomId) !== Number(activeRoomIdRef.current)) return;
         setMessages((current) => {
           if (message?.id && current.some((item) => Number(item?.id) === Number(message.id))) return current;
           return [...current, message];
         });
       },
-      onInvitesChanged: loadInvites,
-      onRoomsChanged: () => loadRooms(),
-      onDisconnect: () => setSocketReady(false),
+      onInvitesChanged: () => {
+        if (isCurrentSocket()) loadInvites();
+      },
+      onRoomsChanged: () => {
+        if (isCurrentSocket()) loadRooms();
+      },
+      onDisconnect: () => {
+        if (isCurrentSocket()) setSocketReady(false);
+      },
+      onError: (message) => {
+        if (!isCurrentSocket()) return;
+        const now = Date.now();
+        if (lastSocketErrorRef.current.message !== message || now - lastSocketErrorRef.current.at > 5000) {
+          lastSocketErrorRef.current = { message, at: now };
+          toast.error(message);
+        }
+      },
     });
     socketRef.current = client;
     return () => {
-      setSocketReady(false);
-      socketRef.current = null;
-      client?.deactivate();
+      if (socketGenerationRef.current === generation) {
+        socketGenerationRef.current += 1;
+        setSocketReady(false);
+        socketRef.current = null;
+      }
+      void client?.deactivate();
     };
   }, [isAdmin, loadInvites, loadRooms]);
 
@@ -326,6 +356,9 @@ export default function ChatPage() {
         return;
       }
       toast.success(result?.message || "Private chat request sent. The chat opens after acceptance.");
+      await loadInvites();
+      const pendingForMe = String(result?.invite?.inviteeUsername || "").toLowerCase() === myUsername;
+      if (pendingForMe) setInvitesOpen(true);
       await loadRooms();
     } catch (error) {
       toast.error(error?.response?.data?.error || "Unable to send private chat request");
@@ -355,16 +388,17 @@ export default function ChatPage() {
   };
 
   const renderMessage = (message) => {
-    const name = senderName(message);
-    const mine = name.toLowerCase() === myUsername || Number(message?.senderId) === Number(user?.id);
-    const system = !message?.sender && !message?.senderId;
+    const identity = senderIdentity(message);
+    const name = identity?.username || "";
+    const mine = (name && name.toLowerCase() === myUsername) || Number(message?.senderId) === Number(user?.id);
+    const system = !identity && !message?.senderId;
     if (system) return <div key={message.id || message.timestamp} className="cv-system-message">{message.content}</div>;
     return (
       <article key={message.id || `${message.timestamp}-${name}`} className={`cv-message ${mine ? "is-mine" : "is-other"}`}>
-        {!mine && (
+        {!mine && identity && (
           <button className="cv-message__sender" type="button" onClick={() => startPrivate(name)}>
-            <UserIdentity username={name} size="sm" />
-            <span>Continue privately</span>
+            <UserIdentity user={identity.user} username={name} size="sm" />
+            <span className="cv-message__private-action">Continue privately</span>
           </button>
         )}
         <div className="cv-message__bubble">

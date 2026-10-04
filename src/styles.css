@@ -7761,8 +7761,8 @@ body,
 .cv-message { display: flex; margin: .75rem 0; flex-direction: column; align-items: flex-start; }
 .cv-message.is-mine { align-items: flex-end; }
 .cv-message__sender { display: flex; align-items: center; gap: .55rem; margin: 0 0 .32rem .2rem; border: 0; color: #a5b4fc; background: transparent; font-size: .68rem; }
-.cv-message__sender span { opacity: 0; transform: translateX(-4px); transition: opacity .15s ease, transform .15s ease; }
-.cv-message:hover .cv-message__sender span, .cv-message__sender:focus-visible span { opacity: 1; transform: none; }
+.cv-message__private-action { opacity: 0; transform: translateX(-4px); transition: opacity .15s ease, transform .15s ease; }
+.cv-message:hover .cv-message__private-action, .cv-message__sender:focus-visible .cv-message__private-action { opacity: 1; transform: none; }
 .cv-message__bubble { max-width: min(72%, 42rem); padding: .75rem .9rem .5rem; border: 1px solid rgba(148, 163, 184, .13); border-radius: 5px 15px 15px 15px; background: #141e2e; box-shadow: 0 8px 18px rgba(0, 0, 0, .18); }
 .cv-message.is-mine .cv-message__bubble { border-color: rgba(45, 212, 191, .2); border-radius: 15px 5px 15px 15px; background: #12303a; }
 .cv-message__bubble p { margin: 0; color: #e5edf7; line-height: 1.5; overflow-wrap: anywhere; }
@@ -7805,5 +7805,5 @@ body,
   .cv-live-state { margin-right: auto; }
   .cv-message-viewport { padding-inline: .8rem; }
   .cv-message__bubble { max-width: 88%; }
-  .cv-message__sender span { display: none; }
+  .cv-message__private-action { display: none; }
 }
