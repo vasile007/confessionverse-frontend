@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell, LogOut, RefreshCw, Send, Shuffle, UserPlus, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import api from "../api";
 import { useAuth } from "../context/AuthContext.jsx";
-import UserIdentity from "../components/UserIdentity.jsx";
+import ChatSidebar from "../components/chat/ChatSidebar.jsx";
+import ChatHeader from "../components/chat/ChatHeader.jsx";
+import MessageList from "../components/chat/MessageList.jsx";
+import MessageComposer from "../components/chat/MessageComposer.jsx";
+import RequestsPanel from "../components/chat/RequestsPanel.jsx";
 import { connectChatSocket, publishChatMessage } from "../services/chatSocketService.js";
 import {
   acceptChatInvite,
@@ -20,14 +23,6 @@ const modeForRoom = (room) => {
   return "private";
 };
 
-const senderIdentity = (message) => {
-  const sender = message?.sender;
-  const username = typeof sender === "object" && sender !== null
-    ? sender.username
-    : message?.senderUsername || (typeof sender === "string" ? sender : "");
-  const normalizedUsername = String(username || "").trim();
-  return normalizedUsername ? { username: normalizedUsername, user: typeof sender === "object" ? sender : null } : null;
-};
 const ACTIVE_ROOM_STORAGE_KEY = "cv_active_chat_room_id";
 
 export default function ChatPage() {
@@ -48,6 +43,8 @@ export default function ChatPage() {
   const [startPrivateOpen, setStartPrivateOpen] = useState(false);
   const [privateUsername, setPrivateUsername] = useState("");
   const [privateBusy, setPrivateBusy] = useState(false);
+  const [mobileConversationOpen, setMobileConversationOpen] = useState(false);
+  const [unreadByRoom, setUnreadByRoom] = useState({});
   const socketRef = useRef(null);
   const socketGenerationRef = useRef(0);
   const lastSocketErrorRef = useRef({ message: "", at: 0 });
@@ -58,11 +55,13 @@ export default function ChatPage() {
   const messageRequestRef = useRef(0);
   const randomOperationRef = useRef(false);
   const roomRequestRef = useRef(0);
+  const roomsRef = useRef([]);
 
   const myUsername = String(user?.username || "").toLowerCase();
   const communityRoom = useMemo(() => rooms.find((room) => modeForRoom(room) === "community") || null, [rooms]);
   const randomRoom = useMemo(() => rooms.find((room) => modeForRoom(room) === "random") || null, [rooms]);
   const privateRooms = useMemo(() => rooms.filter((room) => modeForRoom(room) === "private"), [rooms]);
+  const unreadStorageKey = `cv_chat_unread_${String(user?.id || user?.username || "anonymous")}`;
 
   const privateRoomLabel = useCallback((room) => {
     const participants = Array.isArray(room?.participants) ? room.participants : [];
@@ -98,6 +97,7 @@ export default function ChatPage() {
           || String(room?.username || "").startsWith("Random ");
       });
       setRooms(visible);
+      roomsRef.current = visible;
       const storedRoomId = !preserveSelection
         ? Number(sessionStorage.getItem(ACTIVE_ROOM_STORAGE_KEY) || 0)
         : 0;
@@ -111,6 +111,7 @@ export default function ChatPage() {
       activeRoomIdRef.current = target?.id || null;
       setActiveRoom(target);
       setActiveMode(target ? modeForRoom(target) : "community");
+      return visible;
     } catch (error) {
       if (requestId !== roomRequestRef.current) return;
       toast.error(error?.response?.data?.error || "Unable to load chats");
@@ -150,7 +151,29 @@ export default function ChatPage() {
     setActiveMode(mode);
     setActiveRoom(room);
     setMessages([]);
+    setMobileConversationOpen(true);
+    setUnreadByRoom((current) => {
+      if (!current[String(room.id)]) return current;
+      const next = { ...current };
+      delete next[String(room.id)];
+      return next;
+    });
   }, []);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(unreadStorageKey) || "{}");
+      setUnreadByRoom(stored && typeof stored === "object" ? stored : {});
+    } catch {
+      setUnreadByRoom({});
+    }
+  }, [unreadStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(unreadStorageKey, JSON.stringify(unreadByRoom));
+    } catch {}
+  }, [unreadByRoom, unreadStorageKey]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -182,7 +205,11 @@ export default function ChatPage() {
         if (!isCurrentSocket()) return;
         if (event?.status === "ROOM_UPDATED" && event?.chatRoom?.id) {
           const updated = event.chatRoom;
-          setRooms((current) => [updated, ...current.filter((room) => Number(room.id) !== Number(updated.id))]);
+          setRooms((current) => {
+            const next = [updated, ...current.filter((room) => Number(room.id) !== Number(updated.id))];
+            roomsRef.current = next;
+            return next;
+          });
           if (Number(activeRoomIdRef.current) === Number(updated.id)) setActiveRoom(updated);
           return;
         }
@@ -197,17 +224,40 @@ export default function ChatPage() {
       },
       onMessage: (message) => {
         if (!isCurrentSocket()) return;
-        if (Number(message?.chatRoomId) !== Number(activeRoomIdRef.current)) return;
+        const messageRoomId = Number(message?.chatRoomId);
+        if (messageRoomId !== Number(activeRoomIdRef.current)) {
+          const room = roomsRef.current.find((candidate) => Number(candidate.id) === messageRoomId);
+          if (room && modeForRoom(room) === "private") {
+            setUnreadByRoom((current) => ({
+              ...current,
+              [String(messageRoomId)]: Math.min(99, Number(current[String(messageRoomId)] || 0) + 1),
+            }));
+          } else {
+            loadRooms();
+          }
+          return;
+        }
         setMessages((current) => {
           if (message?.id && current.some((item) => Number(item?.id) === Number(message.id))) return current;
           return [...current, message];
         });
       },
-      onInvitesChanged: () => {
-        if (isCurrentSocket()) loadInvites();
+      onInvitesChanged: (event) => {
+        if (isCurrentSocket()) {
+          loadInvites();
+          if (event?.event === "CHAT_INVITE_CREATED") toast("New private chat request", { icon: "🔔" });
+        }
       },
-      onRoomsChanged: () => {
-        if (isCurrentSocket()) loadRooms();
+      onRoomsChanged: async (event) => {
+        if (!isCurrentSocket()) return;
+        const list = await loadRooms();
+        const roomId = Number(event?.chatRoomId || 0);
+        if (roomId && Array.isArray(list)) {
+          const room = list.find((candidate) => Number(candidate.id) === roomId);
+          if (room && modeForRoom(room) === "private") {
+            selectRoom(room, "private");
+          }
+        }
       },
       onDisconnect: () => {
         if (isCurrentSocket()) setSocketReady(false);
@@ -373,7 +423,10 @@ export default function ChatPage() {
       const result = accept ? await acceptChatInvite(invite.id) : await declineChatInvite(invite.id);
       await loadInvites();
       await loadRooms();
-      if (accept && result?.chatRoom?.id) selectRoom(result.chatRoom, "private");
+      if (accept && result?.chatRoom?.id) {
+        selectRoom(result.chatRoom, "private");
+        setInvitesOpen(false);
+      }
       toast.success(accept ? "Private chat accepted." : "Request declined.");
     } catch (error) {
       toast.error(error?.response?.data?.error || "Unable to respond to request");
@@ -387,109 +440,17 @@ export default function ChatPage() {
     await loadInvites();
   };
 
-  const renderMessage = (message) => {
-    const identity = senderIdentity(message);
-    const name = identity?.username || "";
-    const mine = (name && name.toLowerCase() === myUsername) || Number(message?.senderId) === Number(user?.id);
-    const system = !identity && !message?.senderId;
-    if (system) return <div key={message.id || message.timestamp} className="cv-system-message">{message.content}</div>;
-    return (
-      <article key={message.id || `${message.timestamp}-${name}`} className={`cv-message ${mine ? "is-mine" : "is-other"}`}>
-        {!mine && identity && (
-          <button className="cv-message__sender" type="button" onClick={() => startPrivate(name)}>
-            <UserIdentity user={identity.user} username={name} size="sm" />
-            <span className="cv-message__private-action">Continue privately</span>
-          </button>
-        )}
-        <div className="cv-message__bubble">
-          <p>{message.content}</p>
-          <time>{message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</time>
-        </div>
-      </article>
-    );
-  };
-
   if (isAdmin) return null;
 
   return (
-    <div className="page chat-page cv-chat-page">
+    <div className={`page chat-page cv-chat-page ${mobileConversationOpen ? "is-conversation-open" : ""}`}>
       <section className="cv-chat-shell">
-        <aside className="cv-chat-sidebar">
-          <header className="cv-chat-brand">
-            <span>CHAT</span>
-            <h1>Anonymous conversations</h1>
-          </header>
-
-          <div className="cv-primary-modes">
-            <button className={activeMode === "community" ? "is-active" : ""} onClick={() => selectRoom(communityRoom, "community")} disabled={!communityRoom}>
-              <Users size={19} />
-              <span><strong>Community</strong><small>Talk with everyone</small></span>
-            </button>
-            <button className={activeMode === "random" ? "is-active is-random" : "is-random"} onClick={enterRandom} disabled={randomBusy}>
-              <Shuffle size={19} />
-              <span><strong>{randomBusy ? "Joining…" : "Random Chat"}</strong><small>Meet a small anonymous group</small></span>
-            </button>
-          </div>
-
-          <div className="cv-sidebar-heading">
-            <span>PRIVATE CHATS</span>
-            {invites.length > 0 && <b>{invites.length}</b>}
-          </div>
-          <nav className="cv-private-list" aria-label="Private chats">
-            {loading && <div className="cv-sidebar-empty">Loading chats…</div>}
-            {!loading && privateRooms.length === 0 && <div className="cv-sidebar-empty">Accepted private chats appear here.</div>}
-            {privateRooms.map((room) => {
-              const label = privateRoomLabel(room);
-              return (
-                <button key={room.id} className={Number(activeRoom?.id) === Number(room.id) ? "is-active" : ""} onClick={() => selectRoom(room, "private")}>
-                  <UserIdentity username={label} size="sm" />
-                </button>
-              );
-            })}
-          </nav>
-
-          <button className="cv-start-private" onClick={() => setStartPrivateOpen(true)}><UserPlus size={17} /> Start Private Chat</button>
-          <button className="cv-invites-button" onClick={openInvites}><Bell size={16} /> Requests {invites.length > 0 && <b>{invites.length}</b>}</button>
-          {!user?.premium && <button className="cv-upgrade-button" onClick={() => navigate("/subscriptions")}>Upgrade to Premium</button>}
-        </aside>
+        <ChatSidebar activeMode={activeMode} activeRoomId={activeRoom?.id} communityRoom={communityRoom} randomBusy={randomBusy} privateRooms={privateRooms} privateRoomLabel={privateRoomLabel} unreadByRoom={unreadByRoom} pendingCount={invites.length} loading={loading} isPremium={user?.premium} onSelectRoom={selectRoom} onEnterRandom={enterRandom} onOpenRequests={openInvites} onStartPrivate={() => setStartPrivateOpen(true)} onUpgrade={() => navigate("/subscriptions")} />
 
         <main className="cv-chat-main">
-          <header className="cv-chat-header">
-            <div>
-              <span className="cv-chat-kicker">{activeMode === "private" ? "PRIVATE CHAT" : activeMode.toUpperCase()}</span>
-              <h2>{roomLabel}</h2>
-              <p>{activeMode === "random"
-                ? `${activeRoom?.participants?.length || 1} ${activeRoom?.participants?.length === 1 ? "person" : "people"} here · maximum 6`
-                : activeMode === "community" ? "One shared space for the ConfessionVerse community" : "Anonymous and visible only to participants"}</p>
-            </div>
-            <div className="cv-chat-header__actions">
-              <span className={`cv-live-state ${socketReady ? "is-online" : ""}`}>{socketReady ? "Live" : "Reconnecting"}</span>
-              {activeMode === "random" && activeRoom?.id && (
-                <>
-                  <button onClick={nextRandom} disabled={randomBusy}><Shuffle size={16} /> Next</button>
-                  <button className="is-danger" onClick={leaveRandom} disabled={randomBusy}><LogOut size={16} /> Leave</button>
-                </>
-              )}
-              <button className="is-icon" onClick={() => loadRooms()} aria-label="Refresh chats"><RefreshCw size={16} /></button>
-            </div>
-          </header>
-
-          <div className="cv-message-viewport" ref={messageViewportRef} onScroll={handleViewportScroll}>
-            {messagesLoading && <div className="cv-chat-empty">Loading conversation…</div>}
-            {!messagesLoading && !activeRoom?.id && activeMode === "random" && (
-              <div className="cv-chat-empty"><Shuffle size={30} /><h3>Ready to meet a random group?</h3><p>Rooms hold up to six anonymous people.</p><button onClick={enterRandom}>Enter Random Chat</button></div>
-            )}
-            {!messagesLoading && activeRoom?.id && messages.length === 0 && (
-              <div className="cv-chat-empty"><h3>No messages yet</h3><p>Start the conversation when you are ready.</p></div>
-            )}
-            {!messagesLoading && messages.map(renderMessage)}
-            <div ref={messagesEndRef} />
-          </div>
-
-          <footer className="cv-composer">
-            <input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) handleSend(); }} placeholder={activeRoom?.id ? `Message ${roomLabel}` : "Choose or enter a chat"} maxLength={500} disabled={!activeRoom?.id} />
-            <button onClick={handleSend} disabled={!input.trim() || !activeRoom?.id || !socketReady} aria-label="Send message"><Send size={18} /></button>
-          </footer>
+          <ChatHeader mode={activeMode} room={activeRoom} label={roomLabel} socketReady={socketReady} randomBusy={randomBusy} onNext={nextRandom} onLeave={leaveRandom} onRefresh={() => loadRooms()} onBack={() => setMobileConversationOpen(false)} />
+          <MessageList loading={messagesLoading} room={activeRoom} mode={activeMode} messages={messages} myUsername={myUsername} myUserId={user?.id} viewportRef={messageViewportRef} endRef={messagesEndRef} onScroll={handleViewportScroll} onEnterRandom={enterRandom} onStartPrivate={startPrivate} />
+          <MessageComposer value={input} onChange={setInput} onSend={handleSend} disabled={!activeRoom?.id} socketReady={socketReady} placeholder={activeRoom?.id ? `Message ${roomLabel}` : "Choose or enter a chat"} />
         </main>
       </section>
 
@@ -505,21 +466,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      {invitesOpen && (
-        <div className="cv-modal-backdrop" onMouseDown={() => setInvitesOpen(false)}>
-          <section className="cv-modal" onMouseDown={(event) => event.stopPropagation()}>
-            <span className="cv-chat-kicker">PRIVATE CHATS</span>
-            <h3>Chat requests</h3>
-            {invites.length === 0 && <p>No pending requests.</p>}
-            <div className="cv-invite-list">
-              {invites.map((invite) => (
-                <div key={invite.id}><UserIdentity username={invite.inviterUsername || "Anonymous"} size="sm" /><span><button className="is-secondary" disabled={inviteBusy === invite.id} onClick={() => answerInvite(invite, false)}>Decline</button><button disabled={inviteBusy === invite.id} onClick={() => answerInvite(invite, true)}>Accept</button></span></div>
-              ))}
-            </div>
-            <div><button className="is-secondary" onClick={() => setInvitesOpen(false)}>Close</button></div>
-          </section>
-        </div>
-      )}
+      {invitesOpen && <RequestsPanel invites={invites} busyId={inviteBusy} onAnswer={answerInvite} onClose={() => setInvitesOpen(false)} />}
     </div>
   );
 }
